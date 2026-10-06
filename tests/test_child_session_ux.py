@@ -24,7 +24,8 @@ const results=locales.map(locale=>{{
   const chip=flatten(result.element).find(e=>(e.className||'').split(' ').includes('session-child-count'));
   return {{locale,chip,state:t('session_attention_{state}_title'),
     hint:t('session_child_toggle_hint',t('session_meta_children',1)),
-    archived:LOCALES[locale].session_child_archived}};
+    archived:LOCALES[locale].session_child_archived,
+    running:LOCALES[locale].session_child_running,unread:LOCALES[locale].session_child_unread}};
 }});
 console.log(JSON.stringify(results));
 """
@@ -54,12 +55,15 @@ def test_reference_only_chip_localized_static_archived_label(state):
     for row in render(state, reference=True):
         chip = row["chip"]
         assert row.get("archived"), row["locale"]
+        assert row.get("running") and row.get("unread"), row["locale"]
+        if state in ('streaming', 'unread'):
+            assert chip["title"].startswith(row['running' if state == 'streaming' else 'unread'] + ' · '), row["locale"]
         label, indicator = chip["children"]
         assert label["className"] == "session-child-count-label"
         assert label["textContent"] == row["archived"]
         assert "session-child-count-state" in indicator["className"].split()
         assert chip["title"].endswith(" · " + row["archived"])
-        assert "role" not in chip["attributes"] and "tabindex" not in chip["attributes"]
+        assert chip["attributes"]["role"] == "img" and "tabindex" not in chip["attributes"]
         assert "click" not in chip["title"].lower()
 
 

@@ -7651,7 +7651,7 @@ function _createChildSessionStateIndicator({isStreaming=false,hasUnread=false,at
   state.className='session-state-indicator '+className
     +(attention?attentionClass:(isStreaming?' is-streaming':(hasUnread?' is-unread':'')));
   state.setAttribute('aria-hidden','true');
-  state.title=attention?attention.title:_sessionStateTooltip({isStreaming,hasUnread});
+  state.title=attention?attention.title:(isStreaming?t('session_child_running'):(hasUnread?t('session_child_unread'):''));
   return state;
 }
 
@@ -8969,25 +8969,23 @@ function renderSessionListFromCache(){
       childCountEl.className='session-child-count'
         +(childAttention&&childAttention.kind==='approval'?' is-attention-approval':(childAttention&&childAttention.kind==='clarify'?' is-attention-clarify':''));
       const childLabel=childCount>0?t('session_meta_children', childCount):t('session_child_archived');
-      if(childCount>0) childCountEl.textContent=childLabel;
-      else {
-        const label=document.createElement('span');
-        label.className='session-child-count-label';
-        label.textContent=childLabel;
-        childCountEl.appendChild(label);
-      }
+      const label=document.createElement('span');
+      label.className='session-child-count-label';
+      label.textContent=childLabel;
+      childCountEl.appendChild(label);
       const childBadgeTip=childCount>0?_sessionChildBadgeTooltip(childLabel):childLabel;
       childCountEl.title=childBadgeTip;
       if(hasChildState){
         const state=_createChildSessionStateIndicator(childState,'session-child-count-state');
         childCountEl.appendChild(state);
-        childCountEl.title=`${state.title} · ${childBadgeTip}`;
+        const concurrentRunning=childAttention&&childState.isStreaming?` · ${t('session_child_running')}`:'';
+        childCountEl.title=`${state.title}${concurrentRunning} · ${childBadgeTip}`;
       }
       ['pointerdown','pointerup','click'].forEach(ev=>childCountEl.addEventListener(ev,e=>e.stopPropagation()));
       if(childCount>0){
         childCountEl.setAttribute('role','button');
         childCountEl.setAttribute('tabindex','0');
-        childCountEl.setAttribute('aria-expanded',_expandedChildSessionKeys.has(lineageKey)?'true':'false');
+        childCountEl.setAttribute('aria-expanded',childrenExpanded?'true':'false');
         childCountEl.setAttribute('aria-label',childCountEl.title);
         const toggleChildren=(e)=>{
           e.preventDefault();
@@ -9000,6 +8998,9 @@ function renderSessionListFromCache(){
         childCountEl.onkeydown=(e)=>{
           if(e.key==='Enter'||e.key===' ') toggleChildren(e);
         };
+      }else{
+        childCountEl.setAttribute('role','img');
+        childCountEl.setAttribute('aria-label',childCountEl.title);
       }
       titleRow.appendChild(childCountEl);
     }

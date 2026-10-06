@@ -76,7 +76,7 @@ def test_child_status_attach_and_render_matrix(kind, state, expanded, active):
     out = run_component(raw, refs, expanded, active)
     effective = "idle" if state == "unread" and active == "child" else state
     mark = expected_mark(state)
-    chip_states = out["chip"]["children"]
+    chip_states = [c for c in out["chip"]["children"] if "session-child-count-state" in c["className"]]
     if mark:
         assert len(chip_states) == 1, "Collapsed child status must have a visible mark"
         assert mark in chip_states[0]["className"].split()
@@ -121,7 +121,7 @@ def test_mixed_children_priority_and_parent_independence(own, states, priority):
                 for i, state in enumerate(states)]
     raw = [parent, *children]
     out = run_component(raw, raw, True, "other")
-    assert expected_mark(priority) in out["chip"]["children"][0]["className"].split()
+    assert expected_mark(priority) in out["chip"]["children"][-1]["className"].split()
     for state in ("streaming", "unread", "approval", "clarify"):
         assert (expected_mark(state) in out["dot"]["className"].split()) == (own == state)
     assert [c["dataset"]["sid"] for c in out["children"]] == [c["session_id"] for c in children]
@@ -144,7 +144,7 @@ def test_reference_only_running_child_has_status_even_without_visible_descendant
     assert label["textContent"] == "Child sessions (archived)"
     assert label["className"] == "session-child-count-label"
     assert "is-streaming" in state["className"]
-    assert "role" not in out["chip"]["attributes"], "Reference-only status is not an empty expander"
+    assert out["chip"]["attributes"]["role"] == "img", "Reference-only status is not an empty expander"
     assert not out["children"]
 
 
@@ -156,7 +156,7 @@ def test_attention_precedes_running_and_unread_on_same_child(kind):
                     session_source="fork" if kind == "fork" else "other",
                     is_streaming=True, has_unread=True)
     out = run_component([parent, child], [parent, child], True, "other")
-    for state in [out["chip"]["children"][0],
+    for state in [out["chip"]["children"][-1],
                   next(c for c in out["children"][0]["children"]
                        if "session-child-session-state" in c.get("className", ""))]:
         classes = state["className"].split()
@@ -170,6 +170,6 @@ def test_acknowledged_child_and_removed_children_clear_chip_projection():
                      _child_session_attention={"kind": "approval", "count": 1})
     child = session("child", parent_session_id="parent", relationship_type="child_session")
     out = run_component([parent, child], [parent, child], False, "child")
-    assert not out["chip"]["children"]
+    assert len(out["chip"]["children"]) == 1
     out = run_component([parent], [parent], False, "other")
     assert out["chip"] is None

@@ -75,6 +75,8 @@ def main():
                               const bounds=document.querySelector('#fixture').getBoundingClientRect();
                               return {chipClass:chip.className,title:chip.title,aria:chip.getAttribute('aria-label'),
                                 color:style.color,background:style.backgroundColor,dotColor:ds.color,
+                                labelColor:getComputedStyle(chip.querySelector('.session-child-count-label')).color,
+                                activityColor:document.querySelector('.session-child-activity-indicator')?getComputedStyle(document.querySelector('.session-child-activity-indicator')).color:null,
                                 error:token('error'),warning:token('warning'),accent:token('accent'),approvalTint:tint('error'),clarifyTint:tint('warning'),
                                 ownDot:parentDot.className,children:children.map(e=>{const d=e.querySelector('.session-child-session-state');return {kind:e.className,height:e.getBoundingClientRect().height,width:getComputedStyle(d).width,indicatorHeight:getComputedStyle(d).height,color:getComputedStyle(d).color};}),
                                 clipped:[chip,dot,...children,...document.querySelectorAll('.session-child-session-state,.session-actions-trigger')].some(e=>{const r=e.getBoundingClientRect();return r.left<bounds.left||r.right>bounds.right||r.top<0||r.bottom>innerHeight;})};
@@ -85,6 +87,8 @@ def main():
                             data['hoverBackground'] = hover.evaluate('(el)=>getComputedStyle(el).backgroundColor')
                             reasons = []
                             expected = data['error' if state == 'approval' else 'warning' if state == 'clarify' else 'accent']
+                            if data['labelColor'] != data['color'] or (data['activityColor'] and data['activityColor'] != data['accent']):
+                                reasons.append('active skin neutralizes child label/activity color')
                             if data['dotColor'] != expected:
                                 reasons.append('active parent neutralizes indicator color')
                             if state in ('approval', 'clarify'):
@@ -190,7 +194,7 @@ def main():
                                 reasons.append('active parent neutralizes archived indicator color')
                             if not data['title'].endswith(' · ' + data['label']) or data['text'] != data['label'] or data['aria'] not in (None, data['title']):
                                 reasons.append('localized label or full tooltip/aria lost')
-                            if data['role'] is not None or data['tabindex'] is not None or data['children']:
+                            if data['role'] != 'img' or data['tabindex'] is not None or data['children']:
                                 reasons.append('reference-only chip became navigable')
                             if any(c.startswith('is-') for c in data['ownDot'].split()):
                                 reasons.append('reference state leaked into own dot')

@@ -146,6 +146,27 @@ environment before launching the server, needs no secrets, and does not drive a
 real model (it verifies the app *loads and initializes* cleanly — the brick class
 that breaks the page for everyone).
 
+## Sidebar child-chip presentation gate
+
+With the existing Playwright/Chromium setup, run:
+
+```bash
+python tests/browser_child_chip_visibility.py --output /path/to/artifacts
+```
+
+This isolated component gate uses the production attachment, row renderer,
+stylesheet, and locale dictionaries; it does not start a server or exercise a
+live Agent. It checks approval plus concurrent running children against parent
+unread/approval/clarify combinations, every `Object.keys(LOCALES)` entry, and
+180px/300px sidebars at desktop, tablet, and phone viewports. Measurements reset
+horizontal scrolling and hit-test the chip's status mark before any actionability
+scrolling, using `.session-text` as the clipping boundary. The title retains a
+20px minimum; reference-only chips are capped to preserve useful title space.
+Search-forced expansion and concurrent running must appear in the chip's
+accessible state/name. `--before-ref <commit>` exercises the exact prior source
+and returns failure when the regression is present. JSON and screenshots are
+written to the chosen artifact directory.
+
 ## Public conversation lifecycle gate
 
 `tests/browser_conversation_lifecycle.py` adds a public deterministic

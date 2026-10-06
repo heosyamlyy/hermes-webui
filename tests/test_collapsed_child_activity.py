@@ -50,7 +50,7 @@ def test_other_child_attention_does_not_mask_collapsed_activity(attention):
                 session("waiting", attention, parent_session_id="parent", relationship_type="child_session")]
     out = run_component([parent, *children], [parent, *children], False, "other")
     assert len(out["activity"]) == 1
-    assert f"is-attention-{attention}" in out["chip"]["children"][0]["className"].split()
+    assert f"is-attention-{attention}" in out["chip"]["children"][-1]["className"].split()
     assert "is-unread" in out["dot"]["className"].split()
 
 

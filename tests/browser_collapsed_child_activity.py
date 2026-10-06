@@ -35,7 +35,8 @@ function measure(){
   const pseudo=el=>{const s=getComputedStyle(el,'::before');return {
     animation:s.animationName,background:s.backgroundColor,border:s.borderTopStyle,
     borderWidth:s.borderTopWidth,width:s.width,height:s.height};};
-  const parent=document.querySelector('.session-item').getBoundingClientRect();
+  document.querySelectorAll('*').forEach(el=>{el.scrollLeft=0;});
+  const parent=document.querySelector('.session-text').getBoundingClientRect();
   const visible=el=>{const r=el.getBoundingClientRect();return r.left>=parent.left&&r.right<=parent.right&&r.width>0&&getComputedStyle(el).visibility==='visible';};
   return {activity:activity?{...pseudo(activity),visible:visible(activity)}:null,
     ownClass:dot.className,own:pseudo(dot),
