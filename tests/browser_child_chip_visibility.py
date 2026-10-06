@@ -13,29 +13,45 @@ from tests._sidebar_child_status_helpers import ROOT, component_script  # noqa: 
 
 SCENE = r"""
 const _loadingSessionId=null;
-function scene(own,reference,search){
+function scene(own,reference,search,density,state){
+  window._sidebarDensity=density;
   searchQueryRaw=search?'task':'';
   const parent={session_id:'parent',title:'Parent task with a long conversation title',message_count:3,
+    _compression_segment_count:4,
     has_unread:own.includes('unread'),attention:own.includes('approval')?{kind:'approval',count:1}:own.includes('clarify')?{kind:'clarify',count:1}:null};
   const child=(id,state)=>({session_id:id,title:id+' task',message_count:3,parent_session_id:'parent',
     relationship_type:'child_session',raw_source:'subagent',session_source:'other',
-    is_streaming:state==='running',attention:state==='approval'?{kind:'approval',count:1}:null,
+    is_streaming:state==='running',has_unread:state==='unread',
+    attention:state==='approval'?{kind:'approval',count:1}:state==='clarify'?{kind:'clarify',count:1}:null,
     archived:reference,_lineage_root_id:reference?id:undefined});
-  const children=[child('waiting','approval'),child('working','running')];
+  const children=state.split('+').map((state,i)=>child('child'+i,state));
   const result=renderFixture(reference?[parent]:[parent,...children],[parent,...children],false,'other');
   document.querySelector('#fixture').replaceChildren(result.element);
   document.querySelectorAll('*').forEach(el=>{el.scrollLeft=0;});
   const chip=document.querySelector('.session-child-count'),mark=chip.querySelector('.session-child-count-state');
-  const r=mark.getBoundingClientRect(),clip=document.querySelector('.session-text').getBoundingClientRect();
-  const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+  const text=document.querySelector('.session-text'),clip=text.getBoundingClientRect();
+  const fullyVisible=el=>{
+    const r=el.getBoundingClientRect();
+    const clips=[text,document.querySelector('.session-title-row'),document.querySelector('.session-item'),document.querySelector('#fixture')];
+    return r.width>0&&r.height>0&&clips.every(ancestor=>{
+      const c=ancestor.getBoundingClientRect();
+      return r.left>=c.left&&r.right<=c.right&&r.top>=c.top&&r.bottom<=c.bottom;
+    })&&(()=>{
+      const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+      // The activity spinner deliberately has pointer-events:none.
+      return hit===el||el.contains(hit)||(getComputedStyle(el).pointerEvents==='none'&&hit===el.parentElement);
+    })();
+  };
   const activity=document.querySelector('.session-child-activity-indicator');
-  const ar=activity?.getBoundingClientRect();
-  return {visible:hit===mark&&r.left>=clip.left&&r.right<=clip.right,
+  const pill=document.querySelector('.session-title-row .session-lineage-count');
+  return {visible:fullyVisible(mark),
+    pill:!!pill,pillLabel:pill?.textContent,expectedPillLabel:t('session_meta_segments',4),
+    pillVisible:!pill||fullyVisible(pill),
     titleWidth:document.querySelector('.session-title').getBoundingClientRect().width,
     chipWidth:chip.getBoundingClientRect().width,clipWidth:clip.width,
     aria:chip.getAttribute('aria-label'),tip:chip.title,
     expanded:chip.getAttribute('aria-expanded'),rows:document.querySelectorAll('.session-child-session').length,
-    activity:!!activity,activityVisible:!ar||ar.left>=clip.left&&ar.right<=clip.right,
+    activity:!!activity,activityVisible:!activity||fullyVisible(activity),
     runningLabel:t('session_child_running'),unreadLabel:t('session_child_unread')};
 }
 """
@@ -71,30 +87,38 @@ def main():
                 page.add_script_tag(content=match.group())
             page.add_script_tag(content=SCENE)
             locales = page.evaluate('Object.keys(LOCALES)')
-            for width in [180, 300]:
+            for width in [180, 240, 300]:
                 page.locator('#fixture').evaluate('(el,w)=>el.style.width=w+"px"', width)
                 for locale in locales:
                     page.evaluate('locale=>setLocale(locale)', locale)
                     for own in ['idle', 'unread', 'approval', 'clarify', 'unread-approval', 'unread-clarify']:
                         for reference in [False, True]:
                             for search in [False, True]:
-                                data = page.evaluate('args=>scene(...args)', [own, reference, search])
-                                failures = []
-                                if not data['visible'] or not data['activityVisible']:
-                                    failures.append('status clipped before actionability scrolling')
-                                if data['titleWidth'] < 20:
-                                    failures.append('title minimum lost')
-                                if data['aria'] != data['tip'] or data['runningLabel'] not in (data['aria'] or ''):
-                                    failures.append('concurrent running missing from accessible name')
-                                if data['runningLabel'] == 'session_child_running' or data['unreadLabel'] == 'session_child_unread':
-                                    failures.append('child locale keys missing')
-                                if not reference and data['expanded'] != ('true' if search else 'false'):
-                                    failures.append('search expansion misreported')
-                                if reference and width == 300 and data['titleWidth'] < 80:
-                                    failures.append('archived chip crowds title')
-                                results.append(dict(viewport=viewport, width=width, locale=locale, own=own, reference=reference, search=search, data=data, failures=failures))
-                                if locale == 'en' and own == 'approval' and not search:
-                                    page.screenshot(path=str(args.output / f'{viewport}-{width}-{"archived" if reference else "interactive"}.png'))
+                                for density in ['compact', 'detailed']:
+                                    for state in ['approval', 'clarify', 'running', 'unread', 'approval+running', 'clarify+running']:
+                                        data = page.evaluate('args=>scene(...args)', [own, reference, search, density, state])
+                                        failures = []
+                                        if not data['visible'] or not data['activityVisible']:
+                                            failures.append('status clipped before actionability scrolling')
+                                        if data['titleWidth'] < 20:
+                                            failures.append('title minimum lost')
+                                        if data['pill'] != (density == 'detailed') or (data['pill'] and data['pillLabel'] != data['expectedPillLabel']):
+                                            failures.append('real compression prior-turns pill missing or unexpected')
+                                        if not data['pillVisible']:
+                                            failures.append('prior-turns pill clipped')
+                                        if data['activity'] != ('running' in state and (reference or not search)):
+                                            failures.append('collapsed activity projection missing or unexpected')
+                                        if data['aria'] != data['tip'] or ('running' in state and data['runningLabel'] not in (data['aria'] or '')):
+                                            failures.append('concurrent running missing from accessible name')
+                                        if data['runningLabel'] == 'session_child_running' or data['unreadLabel'] == 'session_child_unread':
+                                            failures.append('child locale keys missing')
+                                        if not reference and data['expanded'] != ('true' if search else 'false'):
+                                            failures.append('search expansion misreported')
+                                        if reference and density == 'compact' and width == 300 and data['titleWidth'] < 80:
+                                            failures.append('archived chip crowds title')
+                                        results.append(dict(viewport=viewport, width=width, locale=locale, own=own, reference=reference, search=search, density=density, state=state, data=data, failures=failures))
+                                        if locale == 'en' and own == 'approval' and not search and state == 'approval+running':
+                                            page.screenshot(path=str(args.output / f'{viewport}-{width}-{density}-{"archived" if reference else "interactive"}.png'))
             context.close()
         browser.close()
     report = dict(cases=len(results), failures=sum(bool(r['failures']) for r in results), errors=errors, results=results)

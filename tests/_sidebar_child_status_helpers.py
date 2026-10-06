@@ -10,7 +10,9 @@ def component_script(source=None):
     names = [
         "_isChildSession", "_isForkWithResolvableParent", "_sessionLineageKey",
         "_sidebarLineageKeyForRow", "_sessionLineageContainsSession",
-        "_sessionTimestampMs", "_sessionDisplayTitle", "_sessionTitleTags",
+        "_sessionTimestampMs", "_sessionDisplayTitle", "_sessionTitleTags", "_formatSessionModelWithGateway",
+        "_sessionSegmentCount", "_lineageReportCacheKey", "_lineageLocalSegmentCount",
+        "_lineageReportNeedsFetch", "_lineageSegmentsForRender", "_sessionLineageBadgeTooltip",
         "_attachChildSessionsToSidebarRows", "_sessionAttentionState",
         "_isSessionEffectivelyStreaming", "_hasPendingUserMessageSignal",
         "_sessionStateTooltip", "_sessionChildBadgeTooltip", "_hasUnreadForSession",
@@ -31,7 +33,8 @@ let activeSidForSidebar = 'other';
 const S={session:null,busy:false};
 const _showArchived=false, _sessionSelectMode=false, _showAllProfiles=false;
 const _expandedChildSessionKeys=new Set(), _sessionSwipeReturnOffsets=new Map();
-const _allProjects=[], _lineageReportInflight=new Map();
+const _allProjects=[], _lineageReportInflight=new Map(), _lineageReportCache=new Map();
+const _expandedLineageKeys=new Set();
 const animateRefresh=false, searchQueryRaw='';
 const SESSION_LONG_PRESS_DELAY_MS=400;
 const SESSION_ARCHIVE_SWIPE_THRESHOLD_PX=128, SESSION_DELETE_SWIPE_THRESHOLD_PX=128, SESSION_SWIPE_CANCEL_RATIO=0.75;
