@@ -2163,7 +2163,9 @@ $('btnNewChat').onclick=async()=>{
      && await _restoreRememberedNewChatDraftSession()){
     await renderSessionList();closeMobileSidebar();$('msg').focus();return;
   }
-  await newSession();await renderSessionList();closeMobileSidebar();$('msg').focus();
+  // newSession() schedules the sidebar refresh itself; awaiting another here
+  // queued a second full list read in front of the composer focus (#7936).
+  await newSession();closeMobileSidebar();$('msg').focus();
 };
 $('btnDownload').onclick=()=>{
   if(!S.session)return;
@@ -2577,7 +2579,8 @@ document.addEventListener('keydown',async e=>{
     // a long generation to finish before they could start something new — exactly
     // the moment they want to switch context. newSession() leaves the in-flight
     // stream running on its own session; the user just gets a fresh blank one.
-    await newSession();await renderSessionList();closeMobileSidebar();$('msg').focus();
+    // As in $('btnNewChat').onclick: newSession() owns the sidebar refresh.
+    await newSession();closeMobileSidebar();$('msg').focus();
   }
   // Cmd/Ctrl+, opens/closes Settings (VS Code convention).
   // Fire globally — like VS Code, don't skip text inputs.
@@ -2743,30 +2746,77 @@ if(window.visualViewport){
       if(saved) targetEl.style.width = saved + 'px';
     }
 
-    let startX=0, startW=0;
+    let startX=0, startW=0, activePointer=null, fallbackDoc=false;
+    const endResize=()=>{
+      if(activePointer===null) return;
+      const id=activePointer;
+      activePointer=null;
+      try{ handle.releasePointerCapture(id); }catch(_){}
+      if(fallbackDoc){
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onCancel);
+        fallbackDoc=false;
+      }
+      handle.classList.remove('dragging');
+      document.body.classList.remove('resizing');
+      const w=parseInt(targetEl.style.width,10);
+      if(Number.isFinite(w)){ try{ localStorage.setItem(storageKey, w); }catch(_){} }
+    };
+    const onMove = ev=>{
+      if(activePointer===null || ev.pointerId!==activePointer) return;
+      ev.preventDefault();
+      const delta = edge==='right' ? ev.clientX - startX : startX - ev.clientX;
+      const newW = Math.min(maxW, Math.max(minW, startW + delta));
+      targetEl.style.width = newW + 'px';
+    };
+    const onUp = ev=>{
+      if(activePointer===null || (ev.pointerId!==undefined && ev.pointerId!==activePointer)) return;
+      endResize();
+    };
+    // Cancel/revoke events from OTHER pointers (a pen or touch contact
+    // elsewhere) must not end this drag; only the active pointer's own
+    // cancel does. Window blur still ends the drag unconditionally.
+    const onCancel = ev=>{
+      if(activePointer===null || ev.pointerId!==activePointer) return;
+      endResize();
+    };
 
-    handle.addEventListener('mousedown', e=>{
-      e.preventDefault();
-      startX = e.clientX;
+    handle.addEventListener('pointerdown', ev=>{
+      if(ev.pointerType==='touch') return;
+      // A second pointer pressing the handle mid-drag must not take the drag
+      // over: without this guard the new press replaces the active pointer and
+      // starting width, the original pointer's move/release is ignored, and the
+      // panel unexpectedly follows the second pointer (greptile review of the
+      // merged #7954 fix).
+      if(activePointer!==null) return;
+      ev.preventDefault();
+      activePointer=ev.pointerId;
+      startX = ev.clientX;
       startW = targetEl.getBoundingClientRect().width;
       handle.classList.add('dragging');
       document.body.classList.add('resizing');
-
-      const onMove = ev=>{
-        const delta = edge==='right' ? ev.clientX - startX : startX - ev.clientX;
-        const newW = Math.min(maxW, Math.max(minW, startW + delta));
-        targetEl.style.width = newW + 'px';
-      };
-      const onUp = ()=>{
-        handle.classList.remove('dragging');
-        document.body.classList.remove('resizing');
-        localStorage.setItem(storageKey, parseInt(targetEl.style.width));
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      // Pointer capture keeps move/up routed to the handle even when the
+      // pointer leaves the window, so a release can never be lost (#7954).
+      let captured=false;
+      try{ handle.setPointerCapture(ev.pointerId); captured=true; }catch(_){ captured=false; }
+      if(!captured){
+        // Capture is unavailable or threw: without a document-level fallback
+        // the drag would stall the moment the pointer leaves this handle, and
+        // the drag state would stick (the #7954 regression this must avoid).
+        fallbackDoc=true;
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+        document.addEventListener('pointercancel', onCancel);
+      }
     });
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onCancel);
+    // The platform can still revoke capture (tab switch, OS gesture); that
+    // must end the drag instead of leaving the panel stuck to the cursor.
+    handle.addEventListener('lostpointercapture', onCancel);
+    window.addEventListener('blur', endResize);
   }
 
   // Run after DOM ready (called from boot)
