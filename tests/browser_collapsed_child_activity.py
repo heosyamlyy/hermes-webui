@@ -41,6 +41,7 @@ function measure(){
   return {activity:activity?{...pseudo(activity),visible:visible(activity)}:null,
     ownClass:dot.className,own:pseudo(dot),
     children:[...document.querySelectorAll('.session-child-session-state')].map(pseudo),
+    chip:[...document.querySelectorAll('.session-child-count-state')].map(pseudo),
     chipVisible:[...document.querySelectorAll('.session-child-count-state')].every(visible),
     opened:[...opened]};
 }
@@ -87,12 +88,11 @@ def main():
                             # Move away from the row so hover does not hide its own dot.
                             page.mouse.move(width-1, 799)
                             data = page.evaluate('measure()')
-                            expected = own != 'streaming' and stage not in ['expanded', 'settled']
                             reasons = []
-                            if bool(data['activity']) != expected:
-                                reasons.append('collapsed activity presence')
-                            if expected and data['activity'] and (data['activity']['animation'] != 'spin' or data['activity']['borderWidth'] != '2px' or not data['activity']['visible']):
-                                reasons.append('activity must be visible CSS spinner')
+                            if data['activity']:
+                                reasons.append('running-only chip duplicates title-row activity')
+                            if stage != 'settled' and (len(data['chip']) != 1 or data['chip'][0]['animation'] != 'spin'):
+                                reasons.append('running-only chip must show its CSS spinner')
                             if own in ['approval', 'clarify'] or (own == 'unread' and active == 'other'):
                                 if data['own']['animation'] != 'none' or data['own']['background'] == 'rgba(0, 0, 0, 0)':
                                     reasons.append('own dot lost to activity')

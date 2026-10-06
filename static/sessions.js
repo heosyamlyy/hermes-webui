@@ -9012,9 +9012,9 @@ function renderSessionListFromCache(){
       if(!childCount&&!hasChildState) titleRow.appendChild(segmentCountEl);
     }
     const childrenExpanded=childCount>0&&Array.isArray(s._child_sessions)&&(_expandedChildSessionKeys.has(lineageKey)||!!searchQueryRaw);
-    // Activity is separate from the parent's own notification. Keep both visible
-    // when the parent needs attention; an archived-only chip cannot be expanded.
-    if(childState.isStreaming&&!childrenExpanded&&!ownStreaming){
+    // The chip already shows running activity unless attention occupies its mark.
+    // Supplement attention without replacing the parent's own notification.
+    if(childAttention&&childState.isStreaming&&!childrenExpanded&&!ownStreaming){
       titleRow.appendChild(_createChildSessionStateIndicator(
         {isStreaming:true},'session-child-activity-indicator'));
     }
@@ -9034,7 +9034,8 @@ function renderSessionListFromCache(){
         const state=_createChildSessionStateIndicator(childState,'session-child-count-state');
         childCountEl.appendChild(state);
         const concurrentRunning=childAttention&&childState.isStreaming?` · ${t('session_child_running')}`:'';
-        childCountEl.title=`${state.title}${concurrentRunning} · ${childBadgeTip}`;
+        const concurrentUnread=childState.hasUnread&&(childAttention||childState.isStreaming)?` · ${t('session_child_unread')}`:'';
+        childCountEl.title=`${state.title}${concurrentRunning}${concurrentUnread} · ${childBadgeTip}`;
       }
       ['pointerdown','pointerup','click'].forEach(ev=>childCountEl.addEventListener(ev,e=>e.stopPropagation()));
       if(childCount>0){

@@ -125,7 +125,7 @@ def main():
                                             failures.append('prior-turns pill clipped')
                                         if not data['pillLabelFits']:
                                             failures.append('prior-turns count and localized cue do not fit')
-                                        if data['activity'] != ('running' in state and (reference or not search)):
+                                        if data['activity'] != ('+' in state and 'running' in state and (reference or not search)):
                                             failures.append('collapsed activity projection missing or unexpected')
                                         if data['aria'] != data['tip'] or ('running' in state and data['runningLabel'] not in (data['aria'] or '')):
                                             failures.append('concurrent running missing from accessible name')

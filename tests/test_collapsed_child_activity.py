@@ -18,11 +18,8 @@ def test_collapsed_child_activity_preserves_own_notification(kind, expanded, act
         child.update(archived=True, _lineage_root_id="child")
         raw = [parent]
     out = run_component(raw, refs, expanded, active)
-    expected = own != "streaming" and (not expanded or kind == "reference")
-    assert len(out["activity"]) == int(expected), "Collapsed running child needs a separate parent activity spinner"
-    if expected:
-        assert out["activity"][0]["className"].split() == [
-            "session-state-indicator", "session-child-activity-indicator", "is-streaming"]
+    assert not out["activity"], "Running-only children already have a chip spinner"
+    assert "is-streaming" in out["chip"]["children"][-1]["className"].split()
     dot = out["dot"]["className"].split()
     assert ("is-streaming" in dot) == (own == "streaming")
     assert ("is-unread" in dot) == (own == "unread" and active != "parent")
@@ -52,6 +49,26 @@ def test_other_child_attention_does_not_mask_collapsed_activity(attention):
     assert len(out["activity"]) == 1
     assert f"is-attention-{attention}" in out["chip"]["children"][-1]["className"].split()
     assert "is-unread" in out["dot"]["className"].split()
+
+
+@pytest.mark.parametrize("kind", ["fork", "delegated", "reference"])
+@pytest.mark.parametrize("expanded", [False, True])
+def test_running_chip_retains_concurrent_child_unread_in_accessible_name(kind, expanded):
+    parent = session("parent", "unread")
+    children = [session("running", "streaming", parent_session_id="parent", relationship_type="child_session"),
+                session("unread", "unread", parent_session_id="parent", relationship_type="child_session",
+                        session_source="fork" if kind == "fork" else "other")]
+    if kind == "reference":
+        for child in children:
+            child.update(archived=True, _lineage_root_id=child["session_id"])
+    raw = [parent] if kind == "reference" else [parent, *children]
+    out = run_component(raw, [parent, *children], expanded, "other")
+    assert not out["activity"]
+    assert "is-streaming" in out["chip"]["children"][-1]["className"].split()
+    assert "Child session is running" in out["chip"]["title"]
+    assert "Unread child completion" in out["chip"]["attributes"]["aria-label"]
+    assert "is-unread" in out["dot"]["className"].split()
+    assert out["unchanged"]
 
 
 @pytest.mark.parametrize("state", ["idle", "unread", "approval", "clarify", "generic"])

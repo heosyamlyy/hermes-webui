@@ -274,10 +274,12 @@ A conversation row's notification indicator reflects only that conversation's
 own running, unread-completion, or approval/clarification state. Nested child
 sessions (including attached forks) must not light the parent's notification dot,
 hide its timestamp, or add unread/attention styling to it. Activity is distinct
-from notification: when children are collapsed and any child is running, a
-separate spinner on the parent's title row exposes that work without replacing
-its own unread or attention cue. Expanded children show activity on their own
-rows; the parent's own running spinner remains regardless of expansion. A
+from notification: when children are collapsed and an attention mark occupies
+the child chip's slot, a separate title-row spinner exposes concurrent child
+work without replacing the parent's own unread or attention cue. Running-only
+children use the chip's spinner without a duplicate title-row spinner. Expanded
+children show activity on their own rows; the parent's own running spinner
+remains regardless of expansion. A
 reference-only archived child with no expandable rows is treated as collapsed.
 The activity projection clears when child work settles and does not acknowledge
 anything. A separate status mark on the
@@ -294,8 +296,12 @@ not delegated child sessions.
 Child-chip tooltips and accessible toggle labels lead with the aggregated state,
 followed by one separator and the localized child count/toggle hint. Approval
 and clarification tint the chip with semantic error/warning colors, including
-when its parent is active. Running and unread retain a plain status mark. A
-reference-only chip uses a localized archived label and is not an expander.
+when its parent is active. Expanded attention rows pair their inset accent with
+the same error/warning background tint as parent attention rows, including when
+selected. Running and unread retain a plain status mark; concurrent unread
+completion remains in the chip tooltip and accessible name when running or
+attention takes visual precedence. A reference-only chip uses a localized
+archived label and is not an expander.
 Fork and delegated row indicators are both 14px; delegated navigation targets
 are at least 44px tall on narrow layouts or coarse pointers, while fine-pointer
 desktop rows remain compact.

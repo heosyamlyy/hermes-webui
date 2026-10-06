@@ -52,6 +52,20 @@ directory. These isolated fixtures prove presentation and control behavior, not
 live approval producers or runtime streaming. Also check the full app sidebar
 with real session metadata when verifying an installed build.
 
+The concurrent-state UX gate is
+`python tests/browser_child_attention_ux.py --output <artifact-directory>`.
+It checks a single running-only chip spinner, supplemental attention-plus-running
+activity, parent-own notifications, concurrent unread accessible labels,
+search/disclosure transitions, reference-only state, and computed expanded-child
+attention background/accent colors across active light/dark skins and mobile.
+Use `--before-ref <commit>` to record exact previous-head failures.
+
+`python tests/browser_child_title_spacing.py --output <artifact-directory>`
+checks fork/worktree/project badge combinations at 180–240px and compares
+childless Detailed-density compressed rows with the production renderer/CSS at
+master `be35ba3e28eef5b59e32b4aad42a74e8e0671111` (that commit must exist locally).
+Childless rows assert master parity, not improved behavior beyond master.
+
 ## Static JS runtime lint (brick-class regression guard)
 
 Some JS bugs throw a `TypeError`/`ReferenceError` only when a specific function

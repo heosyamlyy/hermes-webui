@@ -84,7 +84,7 @@ def test_child_status_attach_and_render_matrix(kind, state, expanded, active):
     else:
         assert not chip_states
     # Notification ownership is unchanged; collapsed child activity is separate.
-    assert len(out["activity"]) == int(state == "streaming" and not expanded)
+    assert not out["activity"], "Single-state running children use the chip spinner"
     assert not any(c in out["parent"].split() for c in ("streaming", "unread", "needs-attention"))
     assert "is-hidden" not in out["time"]["className"]
     assert not any(c.startswith("is-") for c in out["dot"]["className"].split())
