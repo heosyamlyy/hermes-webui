@@ -165,12 +165,17 @@ This isolated component gate uses the production attachment, row renderer,
 stylesheet, and locale dictionaries; it does not start a server or exercise a
 live Agent. It checks approval plus concurrent running children against parent
 unread/approval/clarify combinations, every `Object.keys(LOCALES)` entry, and
-180px/300px sidebars at desktop, tablet, and phone viewports. Measurements reset
+180px/240px/300px sidebars at desktop, tablet, and phone viewports, in compact
+and detailed density. Measurements reset
 horizontal scrolling and hit-test the chip's status mark before any actionability
 scrolling, using `.session-text` as the clipping boundary. The title retains a
 20px minimum; reference-only chips are capped to preserve useful title space.
 Search-forced expansion and concurrent running must appear in the chip's
-accessible state/name. `--before-ref <commit>` exercises the exact prior source
+accessible state/name. In detailed density, earlier-turn navigation moves below
+metadata when a child chip is present; its full localized count and cue must fit
+inside the pill, measured with text-range geometry rather than just its box.
+Enter/Space disclosure and keyboard/touch navigation to a prior segment are also
+exercised without relying on hover. `--before-ref <commit>` exercises the exact prior source
 and returns failure when the regression is present. JSON and screenshots are
 written to the chosen artifact directory.
 

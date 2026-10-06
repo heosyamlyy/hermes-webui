@@ -8978,8 +8978,13 @@ function renderSessionListFromCache(){
     if(lineageSegmentsExpanded&&needsLineageReport){
       _fetchLineageReportForRow(s,lineageKey).then(()=>renderSessionListFromCache());
     }
+    const childCount=typeof s._child_session_count==='number'?s._child_session_count:(Array.isArray(s._child_sessions)?s._child_sessions.length:0);
+    const childAttention=_sessionAttentionState({attention:s._child_session_attention});
+    const childState={isStreaming:!!s._child_session_streaming,hasUnread:!!s._child_session_has_unread,attention:childAttention};
+    const hasChildState=childState.isStreaming||childState.hasUnread||!!childAttention;
+    let segmentCountEl=null;
     if(segmentCount>0){
-      const segmentCountEl=document.createElement('span');
+      segmentCountEl=document.createElement('span');
       segmentCountEl.className='session-lineage-count'+(canExpandLineageSegments?' expandable':'');
       const segmentLabel=t('session_meta_segments', segmentCount);
       segmentCountEl.textContent=segmentLabel;
@@ -9004,12 +9009,8 @@ function renderSessionListFromCache(){
           if(e.key==='Enter'||e.key===' '){toggleLineageSegments(e);}
         };
       }
-      titleRow.appendChild(segmentCountEl);
+      if(!childCount&&!hasChildState) titleRow.appendChild(segmentCountEl);
     }
-    const childCount=typeof s._child_session_count==='number'?s._child_session_count:(Array.isArray(s._child_sessions)?s._child_sessions.length:0);
-    const childAttention=_sessionAttentionState({attention:s._child_session_attention});
-    const childState={isStreaming:!!s._child_session_streaming,hasUnread:!!s._child_session_has_unread,attention:childAttention};
-    const hasChildState=childState.isStreaming||childState.hasUnread||!!childAttention;
     const childrenExpanded=childCount>0&&Array.isArray(s._child_sessions)&&(_expandedChildSessionKeys.has(lineageKey)||!!searchQueryRaw);
     // Activity is separate from the parent's own notification. Keep both visible
     // when the parent needs attention; an archived-only chip cannot be expanded.
@@ -9086,6 +9087,13 @@ function renderSessionListFromCache(){
       meta.className='session-meta';
       meta.textContent=metaBits.join(' · ');
       sessionText.appendChild(meta);
+    }
+    if(segmentCountEl&&(childCount>0||hasChildState)){
+      // Keep earlier-turn navigation readable without crowding child status.
+      const lineageSummary=document.createElement('div');
+      lineageSummary.className='session-lineage-summary';
+      lineageSummary.appendChild(segmentCountEl);
+      sessionText.appendChild(lineageSummary);
     }
     const contentPreview=titleMatched?'':_sessionSearchContentPreview(s,searchQueryRaw);
     if(contentPreview){

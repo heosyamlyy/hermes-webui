@@ -5709,7 +5709,11 @@ main.main > #mainPlugin{display:none;}
 
 /* ── Subagent session tree (#494) ── */
 .session-lineage-count{display:inline-flex;align-items:center;justify-content:center;height:16px;font-size:10px;font-weight:600;padding:0 6px;border-radius:999px;background:rgba(148,163,184,.14);color:var(--muted);margin-left:6px;flex-shrink:0;user-select:none;cursor:default;}
-.session-title-row .session-lineage-count{display:inline-block;flex-shrink:1;min-width:9px;padding:0 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:16px}
+.session-lineage-summary{display:flex;margin-top:2px;min-width:0;}
+/* Preserve the attention gutter while focusing lineage navigation: wrapping must
+   not move a segment between touchstart and the synthesized click. */
+.session-item:is(.streaming,.unread,.needs-attention):has(.session-lineage-summary):focus-within{padding-right:40px;}
+.session-item .session-text .session-lineage-summary .session-lineage-count{height:auto;min-height:16px;max-width:100%;box-sizing:border-box;margin-left:0;white-space:normal;overflow-wrap:anywhere;line-height:16px;}
 .session-lineage-count.expandable{cursor:pointer;}
 .session-lineage-count.expandable:hover{background:rgba(148,163,184,.24);color:var(--text);}
 .session-item.active .session-lineage-count{color:var(--accent-text);background:rgba(255,255,255,.14);}
