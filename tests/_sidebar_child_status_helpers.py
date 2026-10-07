@@ -18,6 +18,8 @@ def component_script(source=None):
         "_sessionStateTooltip", "_sessionChildBadgeTooltip", "_hasUnreadForSession",
     ]
     # New helper is optional so the same harness exercises the exact prior head.
+    if "function _sessionRowHasLineageSummary(" in source:
+        names.append("_sessionRowHasLineageSummary")
     if "function _createChildSessionStateIndicator(" in source:
         names.append("_createChildSessionStateIndicator")
     functions = []

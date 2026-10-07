@@ -8032,6 +8032,12 @@ function clearOptimisticSessionStreaming(sid){
 }
 
 
+function _sessionRowHasLineageSummary(s){
+  if(window._sidebarDensity!=='detailed'||_sessionSegmentCount(s)<=0) return false;
+  const childCount=typeof s._child_session_count==='number'?s._child_session_count:(Array.isArray(s._child_sessions)?s._child_sessions.length:0);
+  return childCount>0||!!s._child_session_streaming||!!s._child_session_has_unread||!!_sessionAttentionState({attention:s._child_session_attention});
+}
+
 function _sessionVirtualWindow(opts){
   const total=Math.max(0, Number(opts&&opts.total)||0);
   const threshold=Math.max(1, Number(opts&&opts.threshold)||SESSION_VIRTUAL_THRESHOLD_ROWS);
@@ -8039,7 +8045,7 @@ function _sessionVirtualWindow(opts){
   const buffer=Math.max(0, Number(opts&&opts.buffer)||SESSION_VIRTUAL_BUFFER_ROWS);
   const viewportHeight=Math.max(itemHeight, Number(opts&&opts.viewportHeight)||itemHeight*10);
   const visibleRows=Math.max(1, Math.ceil(viewportHeight/itemHeight));
-  if(total<=threshold){
+  if(total<=threshold||(opts&&opts.variableHeight)){
     return {virtualized:false,start:0,end:total,topPad:0,bottomPad:0,itemHeight,total};
   }
   let start=Math.floor((Number(opts&&opts.scrollTop)||0)/itemHeight)-buffer;
@@ -8080,6 +8086,7 @@ function _scheduleSessionVirtualizedRender(){
   if(_sessionListSkeletonActive) return;
   if(_renamingSid||_sessionVirtualScrollRaf) return;
   const list=_sessionVirtualScrollList;
+  if(list&&list.dataset.sessionVirtualEnabled==='false') return;
   const total=Number(list&&list.dataset&&list.dataset.sessionVirtualTotal||0);
   // Skip the re-render if the list is below the virtualization threshold —
   // there's no virtual window to recompute, and re-rendering would just
@@ -8090,6 +8097,7 @@ function _scheduleSessionVirtualizedRender(){
   _sessionVirtualScrollRaf=requestAnimationFrame(()=>{
     _sessionVirtualScrollRaf=0;
     const liveList=_sessionVirtualScrollList;
+    if(liveList&&liveList.dataset.sessionVirtualEnabled==='false') return;
     const liveTotal=Number(liveList&&liveList.dataset&&liveList.dataset.sessionVirtualTotal||0);
     if(liveList&&liveTotal>SESSION_VIRTUAL_THRESHOLD_ROWS){
       const nextWindow=_sessionVirtualWindow({
@@ -8711,9 +8719,13 @@ function renderSessionListFromCache(){
   }
   if(curItems.length) groups.push({label:curLabel,items:curItems});
   const flatSessionRows=[];
+  let hasLineageSummary=false;
   for(const g of groups){
     if(_groupCollapsed[g.label]) continue;
-    for(const s of g.items){ flatSessionRows.push({group:g,session:s}); }
+    for(const s of g.items){
+      flatSessionRows.push({group:g,session:s});
+      if(!hasLineageSummary&&_sessionRowHasLineageSummary(s)) hasLineageSummary=true;
+    }
   }
   _sessionVisibleSidebarIds=flatSessionRows.map(row=>row.session&&row.session.session_id).filter(Boolean);
   for(const row of flatSessionRows){
@@ -8734,6 +8746,7 @@ function renderSessionListFromCache(){
     list.dataset.sessionVirtualFilter!==q
   );
   const virtualWindowBeforeActiveAnchor=_sessionVirtualWindow({
+    variableHeight:hasLineageSummary,
     total:flatSessionRows.length,
     scrollTop:listScrollTopBeforeRender,
     viewportHeight:list.clientHeight||520,
@@ -8745,6 +8758,7 @@ function renderSessionListFromCache(){
   const activeWasAlreadyVisible=activeIndex>=virtualWindowBeforeActiveAnchor.start&&activeIndex<virtualWindowBeforeActiveAnchor.end;
   const shouldMoveSidebarToActive=shouldAnchorActive&&!activeWasAlreadyVisible;
   let virtualWindow=_sessionVirtualWindow({
+    variableHeight:hasLineageSummary,
     total:flatSessionRows.length,
     scrollTop:listScrollTopBeforeRender,
     viewportHeight:list.clientHeight||520,
@@ -8763,6 +8777,9 @@ function renderSessionListFromCache(){
     delete list.dataset.sessionVirtualActiveAnchor;
   }
   list.dataset.sessionVirtualTotal=String(flatSessionRows.length);
+  // The rendered window owns the scroll policy. Detailed lineage summaries
+  // add a wrapping line, so fixed-height spacers cannot represent these rows.
+  list.dataset.sessionVirtualEnabled=String(virtualWindow.virtualized);
   list.dataset.sessionVirtualFilter=q;
   list.dataset.sessionVirtualStart=String(virtualWindow.start);
   list.dataset.sessionVirtualEnd=String(virtualWindow.end);
@@ -9092,7 +9109,7 @@ function renderSessionListFromCache(){
       meta.textContent=metaBits.join(' · ');
       sessionText.appendChild(meta);
     }
-    if(segmentCountEl&&(childCount>0||hasChildState)){
+    if(segmentCountEl&&_sessionRowHasLineageSummary(s)){
       // Keep earlier-turn navigation readable without crowding child status.
       const lineageSummary=document.createElement('div');
       lineageSummary.className='session-lineage-summary';

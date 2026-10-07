@@ -57,10 +57,28 @@ function measure(){
 }
 function rowStyle(selector){
   const e=document.querySelector(selector),d=e.querySelector('.session-child-session-state');
+  // Composite the actual computed ancestor/row paints into sRGB pixels. A
+  // matching CSS token alone cannot demonstrate a visible selection wash.
+  const canvas=document.createElement('canvas');canvas.width=canvas.height=1;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,1,1);
+  const ancestors=[];for(let p=e.parentElement;p;p=p.parentElement)ancestors.unshift(p);
+  for(const p of ancestors){ctx.fillStyle=getComputedStyle(p).backgroundColor;ctx.fillRect(0,0,1,1);}
+  const basePixel=[...ctx.getImageData(0,0,1,1).data].slice(0,3);
+  ctx.fillStyle=getComputedStyle(e).backgroundColor;ctx.fillRect(0,0,1,1);
+  const pixel=[...ctx.getImageData(0,0,1,1).data].slice(0,3);
   return {background:getComputedStyle(e).backgroundColor,shadow:getComputedStyle(e).boxShadow,
-    color:getComputedStyle(d).color,animation:getComputedStyle(d,'::before').animationName};
+    color:getComputedStyle(d).color,animation:getComputedStyle(d,'::before').animationName,basePixel,pixel};
 }
 """
+
+
+def contrast(a, b):
+    def luminance(pixel):
+        rgb = [c / 255 for c in pixel]
+        linear = [c / 12.92 if c <= .04045 else ((c + .055) / 1.055) ** 2.4 for c in rgb]
+        return sum(c * w for c, w in zip(linear, [.2126, .7152, .0722], strict=True))
+    light, dark = sorted([luminance(a), luminance(b)], reverse=True)
+    return (light + .05) / (dark + .05)
 
 
 def main():
@@ -134,9 +152,12 @@ def main():
                             page.wait_for_timeout(180)
                             selected = page.evaluate('rowStyle', selector)
                             failures = []
-                            selection = 'rgba(255, 255, 255, 0.06)'
-                            if idle['background'] == selection or hover['background'] != selection or selected['background'] != selection:
+                            if idle['background'] == selected['background'] or hover['background'] != selected['background']:
                                 failures.append('hover/selection not distinguishable from idle attention')
+                            selected['contrast'] = contrast(selected['basePixel'], selected['pixel'])
+                            hover['contrast'] = contrast(hover['basePixel'], hover['pixel'])
+                            if min(selected['contrast'], hover['contrast']) < 1.08:
+                                failures.append('selection wash not visibly distinct from surrounding surface')
                             if leave != idle:
                                 failures.append('leaving hover does not restore attention tint')
                             if any(s['color'] != idle['color'] or s['shadow'] != idle['shadow'] for s in [hover, selected]):

@@ -11,6 +11,20 @@ Use this guide when a change touches layout, chat rendering, composer chrome,
 navigation, theme/skin behavior, responsive behavior, or visual hierarchy. For
 purely backend changes, use the runtime/state contracts instead.
 
+## Sidebar lineage and selection
+
+Detailed rows with a separate lineage-summary line use the full rendered list,
+not fixed-height virtual spacers. The projected visible rows determine that mode
+on each render; the scroll scheduler uses the rendered list's mode, including
+when an earlier compact-mode callback is pending. Compact lists and Detailed
+rows without summaries retain the existing fixed-height virtualization. This
+bounded exception does not change the existing expanded-child/segment policy.
+
+Child hover and selection use a neutral wash derived from the theme's text
+color, so it remains visible in both light and dark themes. Attention tint is
+restored on hover leave; the attention bar and semantic state mark remain
+visible while hovering or selecting delegated and fork children.
+
 ## Product shape
 
 Hermes WebUI is a browser workbench for Hermes Agent with near-CLI parity and a
