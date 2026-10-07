@@ -48,7 +48,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--before-ref')
-    parser.add_argument('--case', choices=['anchor', 'previews', 'all'], default='all')
+    parser.add_argument('--case', choices=['anchor', 'selection', 'previews', 'all'], default='all')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
@@ -72,25 +72,63 @@ def main():
             if touch:
                 page.evaluate('$("sessionList").style.width="180px"')
             if args.case in ['anchor', 'all']:
-                for entry in ['reload', 'search-return']:
+                for entry, sid, position in [(entry, sid, position)
+                                             for entry in ['reload', 'search-return']
+                                             for sid, position in [('p0', 0), ('p2', 0), ('p10', 0),
+                                                                   ('p15', 0), ('p100', 0), ('p10', 900)]]:
                     page.evaluate('activeSidForSidebar="other";groupScene()')
-                    if entry == 'search-return':
-                        page.evaluate('window.savedGroups=groups;searchQueryRaw="Conversation 100";$("sessionSearch").value=searchQueryRaw;'
-                                      'groups=[{label:"Older",items:groups.at(-1).items.filter(s=>s.session_id==="p100")}];repaint()')
-                        target = page.locator('.session-item[data-sid="p100"] .session-title')
-                        target.tap() if touch else target.click()
-                        page.evaluate('activeSidForSidebar="p100";repaint();searchQueryRaw="";$("sessionSearch").value="";groups=savedGroups;repaint()')
-                    else:
-                        page.evaluate('activeSidForSidebar="p100";delete $("sessionList").dataset.sessionVirtualActiveAnchor;repaint()')
+                    page.evaluate('(position)=>$("sessionList").scrollTop=position', position)
                     page.wait_for_timeout(100)
-                    state = page.evaluate('geometry("p100")')
-                    page.screenshot(path=str(args.output / f'{width}-{entry}.png'))
+                    initial = page.evaluate('(sid)=>geometry(sid)', sid)
+                    if entry == 'search-return':
+                        page.evaluate('(sid)=>{window.savedGroups=groups;searchQueryRaw="Conversation "+sid.slice(1);$("sessionSearch").value=searchQueryRaw;'
+                                      'groups=[{label:"Older",items:groups.flatMap(g=>g.items).filter(s=>s.session_id===sid)}];repaint()}', sid)
+                        target = page.locator(f'.session-item[data-sid="{sid}"] .session-title')
+                        target.tap() if touch else target.click()
+                        page.evaluate('(sid)=>{activeSidForSidebar=sid;repaint();searchQueryRaw="";$("sessionSearch").value="";groups=savedGroups;repaint()}', sid)
+                    else:
+                        page.evaluate('(sid)=>{activeSidForSidebar=sid;delete $("sessionList").dataset.sessionVirtualActiveAnchor;repaint()}', sid)
+                    page.wait_for_timeout(100)
+                    state = page.evaluate('(sid)=>geometry(sid)', sid)
+                    page.screenshot(path=str(args.output / f'{width}-{entry}-{sid}-{position}.png'))
                     failures = []
                     if state['top'] is None or state['top'] < 0 or state['bottom'] > state['height']:
                         failures.append('active row not fully within short grouped viewport')
                     if state['rows'] >= 80:
                         failures.append('unbounded DOM')
-                    results.append(dict(scene=entry, width=width, state=state, failures=failures))
+                    if entry == 'reload' and initial['top'] is not None and initial['top'] >= 0 and initial['bottom'] <= initial['height']:
+                        if state['scrollTop'] != initial['scrollTop']:
+                            failures.append('already visible activation steals scroll')
+                    # Ordinary refresh must not recenter an unchanged active ID.
+                    page.evaluate('$("sessionList").scrollTop=3500')
+                    page.wait_for_timeout(100)
+                    before_refresh = page.evaluate('visible()')
+                    page.evaluate('repaint()')
+                    page.wait_for_timeout(100)
+                    after_refresh = page.evaluate('visible()')
+                    if before_refresh['rows'][0] != after_refresh['rows'][0]:
+                        failures.append('ordinary refresh steals scroll from active row')
+                    results.append(dict(scene=entry, width=width, state=state, initial=initial, failures=failures))
+            if args.case in ['selection', 'all']:
+                for kind, sid in [('plain', 'p0'), ('children', 'prior0-0')]:
+                    page.evaluate('([kind,sid])=>{activeSidForSidebar=sid;scene("detailed",kind)}', [kind, sid])
+                    initial = page.evaluate('$("sessionList")._sessionVirtualLayout.measured.get("p0")')
+                    assert page.locator('.session-date-body>.session-item[data-sid="p0"].active').count() == 1
+                    page.evaluate('$("sessionList").scrollTop=3500')
+                    page.wait_for_timeout(100)
+                    assert page.locator('.session-date-body>.session-item[data-sid="p0"]').count() == 0
+                    page.evaluate('activeSidForSidebar="other";repaint()')
+                    retained = page.evaluate('$("sessionList")._sessionVirtualLayout.measured.get("p0") || null')
+                    page.evaluate('$("sessionList").scrollTop=0')
+                    page.wait_for_timeout(100)
+                    actual = page.evaluate('$("sessionList")._sessionVirtualLayout.measured.get("p0")')
+                    failures = []
+                    if retained is not None:
+                        failures.append('offscreen selected measurement survives deselection')
+                    if initial['height'] == actual['height']:
+                        failures.append('fixture does not exercise selection height change')
+                    results.append(dict(scene='selection', width=width, kind=kind, initial=initial,
+                                        retained=retained, actual=actual, failures=failures))
             if args.case in ['previews', 'all']:
                 for transition in ['hide', 'show']:
                     page.evaluate('activeSidForSidebar="other";scene("detailed","plain");'

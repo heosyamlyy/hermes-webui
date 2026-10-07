@@ -18,6 +18,7 @@ def test_grouped_active_anchor_and_offscreen_preview_heights(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads((tmp_path / 'geometry/report.json').read_text())
-    assert len(report['results']) == 8
+    assert len(report['results']) == 32
+    assert sum(scene['scene'] == 'selection' for scene in report['results']) == 4
     assert not report['errors']
     assert all(not scene['failures'] for scene in report['results'])

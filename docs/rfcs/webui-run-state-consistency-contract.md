@@ -316,10 +316,15 @@ enter the window. Measurements include wrapped localized summaries and expanded
 descendants, are pruned with the current rows, and are invalidated by layout,
 typography, theme or locale changes. Search query/title and content-preview text
 or visibility changes also invalidate a row's measurement, including offscreen
-rows. Scroll callbacks, including pending animation frames, consume that same
+rows. Selection changes, including selection through a lineage member, invalidate
+that row's retained height; selected heights do not seed unselected-row estimates.
+Scroll callbacks, including pending animation frames, consume that same
 current layout. Repainting preserves the visible conversation and its offset;
 reload and leaving search can bring an off-window active conversation into view
 using the rendered row's position, including preceding controls and date headers.
+Overscan membership is not viewport visibility: activation/filter transitions
+check the actual row rectangle, preserving an already visible target. Ordinary
+scroll refreshes do not recenter an unchanged active conversation.
 This presentation cache does not acknowledge notifications or mutate session metadata.
 
 ## Client-side unread persistence (sidebar layer)

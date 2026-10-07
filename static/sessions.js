@@ -8093,7 +8093,7 @@ function _sessionVirtualLayoutKey(list){
     ...Array.from(root.attributes,a=>a.name+'='+a.value),t('session_child_archived_short')].join('|');
 }
 
-function _sessionVirtualLayout(list, rows, query){
+function _sessionVirtualLayout(list, rows, query, activeSid){
   const key=_sessionVirtualLayoutKey(list);
   let layout=list._sessionVirtualLayout;
   if(!layout||layout.key!==key) layout={key,measured:new Map(),estimates:[52,72]};
@@ -8101,15 +8101,17 @@ function _sessionVirtualLayout(list, rows, query){
   layout.measured=new Map();
   layout.rows=rows.map(row=>{
     const s=row.session,summary=Number(_sessionRowHasLineageSummary(s));
+    const active=_sessionLineageContainsSession(s,activeSid);
     const lineageKey=_sidebarLineageKeyForRow(s);
     // Search can add/remove a preview without changing lineage. Include its
     // text and title/query inputs so offscreen measurements cannot survive it.
     const shape=JSON.stringify([summary,_sessionSegmentCount(s),s._child_session_count,
       _expandedLineageKeys.has(lineageKey),_expandedChildSessionKeys.has(lineageKey),
-      query||'',query?_sessionDisplayTitle(s):'',_sessionSearchContentPreview(s,query)]);
+      query||'',query?_sessionDisplayTitle(s):'',_sessionSearchContentPreview(s,query),
+      active?activeSid:'']);
     const id=s.session_id,old=previous.get(id);
     if(old&&old.shape===shape) layout.measured.set(id,old);
-    return {id,shape,summary};
+    return {id,shape,summary,active};
   });
   _sessionVirtualOffsets(layout);
   list._sessionVirtualLayout=layout;
@@ -8143,7 +8145,7 @@ function _measureSessionVirtualRows(list, layout, rendered, spacers){
     layout.measured.set(row.id,{shape:row.shape,height});
     // Expanded descendants are part of this row's measured height, but must
     // not inflate the estimate for unrelated collapsed conversations.
-    if(!el.querySelector('.session-child-session,.session-lineage-segment')) layout.estimates[row.summary]=height;
+    if(!row.active&&!el.querySelector('.session-child-session,.session-lineage-segment')) layout.estimates[row.summary]=height;
   }
   _sessionVirtualOffsets(layout);
   for(const {el,start,end} of spacers) el.style.height=(layout.offsets[end]-layout.offsets[start])+'px';
@@ -8825,7 +8827,7 @@ function renderSessionListFromCache(){
   }
   _ensureSessionVirtualScrollHandler(list);
   const previousVirtualLayout=list._sessionVirtualLayout;
-  const virtualLayout=_sessionVirtualLayout(list,flatSessionRows,searchQueryRaw);
+  const virtualLayout=_sessionVirtualLayout(list,flatSessionRows,searchQueryRaw,activeSidForSidebar);
   const resizedAnchorIndex=previousVirtualLayout!==virtualLayout&&viewportAnchorBeforeRender
     ?flatSessionRows.findIndex(row=>row.session.session_id===viewportAnchorBeforeRender.id):-1;
   const renderedVirtualRows=[],virtualSpacers=[];
@@ -8834,18 +8836,9 @@ function renderSessionListFromCache(){
     list.dataset.sessionVirtualActiveAnchor!==activeSidForSidebar||
     list.dataset.sessionVirtualFilter!==q
   );
-  const virtualWindowBeforeActiveAnchor=_sessionVirtualWindow({
-    offsets:virtualLayout.offsets,
-    total:flatSessionRows.length,
-    scrollTop:listScrollTopBeforeRender,
-    viewportHeight:list.clientHeight||520,
-    itemHeight:SESSION_VIRTUAL_ROW_HEIGHT,
-    buffer:SESSION_VIRTUAL_BUFFER_ROWS,
-    threshold:SESSION_VIRTUAL_THRESHOLD_ROWS,
-    activeIndex:-1,
-  });
-  const activeWasAlreadyVisible=activeIndex>=virtualWindowBeforeActiveAnchor.start&&activeIndex<virtualWindowBeforeActiveAnchor.end;
-  const shouldMoveSidebarToActive=shouldAnchorActive&&!activeWasAlreadyVisible;
+  // Render-window membership includes overscan, not viewport visibility. On an
+  // activation/filter transition render the target, then inspect its real rect.
+  const shouldMoveSidebarToActive=shouldAnchorActive;
   let virtualWindow=_sessionVirtualWindow({
     offsets:virtualLayout.offsets,
     total:flatSessionRows.length,
@@ -8929,11 +8922,12 @@ function renderSessionListFromCache(){
     // The real row position includes controls and every preceding group header,
     // which are not part of the session-height prefix sums.
     const activeRow=renderedVirtualRows.find(row=>row.index===activeIndex);
+    list.scrollTop=listScrollTopBeforeRender;
     if(activeRow){
-      const rect=activeRow.el.getBoundingClientRect();
-      virtualAnchorScrollTop=Math.max(0,list.scrollTop+rect.top-list.getBoundingClientRect().top-(list.clientHeight-rect.height)/2);
+      const rect=activeRow.el.getBoundingClientRect(),top=list.getBoundingClientRect().top;
+      const alreadyVisible=rect.bottom>top&&rect.top<top+list.clientHeight;
+      if(!alreadyVisible) list.scrollTop=Math.max(0,list.scrollTop+rect.top-top-(list.clientHeight-rect.height)/2);
     }
-    list.scrollTop=virtualAnchorScrollTop;
   }else if(listScrollTopBeforeRender>0){
     // Always restore the user's scroll position after re-render, regardless
     // of whether the virtualization window applies. Lists below the

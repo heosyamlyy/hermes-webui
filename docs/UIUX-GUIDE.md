@@ -17,10 +17,13 @@ Large lists remain virtualized in both Compact and Detailed density, including
 rows with lineage summaries. The rendered list owns measured row heights and
 prefix-sum spacers; unseen rows use plain/summary estimates until rendered.
 Measurements include expanded children/segments and localized wrapping, and are
-invalidated by layout or search-preview changes. Scroll callbacks use the current
+invalidated by layout, search-preview or selection changes. Selected row heights
+do not inflate unselected-row estimates. Scroll callbacks use the current
 layout even when queued before a density change. Repainting preserves the top
 conversation and offset; off-window active anchoring uses rendered geometry so
-preceding controls and date-group headers are included.
+preceding controls and date-group headers are included. On activation or filter
+changes, an overscan-only target is brought into the viewport while an already
+visible target stays put; ordinary refreshes do not steal the user's scroll.
 
 Child hover and selection use a neutral wash derived from the theme's text
 color, so it remains visible in both light and dark themes. Attention tint is
