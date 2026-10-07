@@ -54,7 +54,10 @@ function measure(){
     children:[...root.querySelectorAll('.session-child-session')].map(e=>({className:e.className,
       background:getComputedStyle(e).backgroundColor,shadow:getComputedStyle(e).boxShadow,
       color:getComputedStyle(e.querySelector('.session-child-session-state')).color,
-      state:pseudo(e.querySelector('.session-child-session-state'))}))};
+      selectionAlpha:(()=>{const probe=document.createElement('canvas').getContext('2d');
+      probe.fillStyle=getComputedStyle(e).backgroundColor;probe.fillRect(0,0,1,1);
+      return probe.getImageData(0,0,1,1).data[3]/255;})(),
+    state:pseudo(e.querySelector('.session-child-session-state'))}))};
 }
 """
 
@@ -133,6 +136,11 @@ def main():
                                                 expected_background = data['expectedSelection'] if active else data['expectedBackground']
                                                 if child['background'] != expected_background:
                                                     failures.append('child attention must use selection wash when active, parent tint when idle')
+                                                # Independent visibility floor, not sampled from the
+                                                # selected reference rule. Contrast is additionally
+                                                # exercised by browser_child_finishing_ux.py.
+                                                if active and child['selectionAlpha'] < 0.04:
+                                                    failures.append('selected child wash is transparent or negligible')
                                                 if active and child['background'] == data['expectedBackground']:
                                                     failures.append('child selection indistinguishable from idle attention tint')
                                                 if data['expectedAccent'] not in child['shadow'] or child['color'] != data['expectedAccent']:
