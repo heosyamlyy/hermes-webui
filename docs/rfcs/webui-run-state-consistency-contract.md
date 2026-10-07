@@ -314,11 +314,13 @@ with child summaries. The rendered list owns transient row-height measurements
 and prefix-sum spacers; unseen rows use plain/summary height estimates until they
 enter the window. Measurements include wrapped localized summaries and expanded
 descendants, are pruned with the current rows, and are invalidated by layout,
-typography, theme or locale changes. Scroll callbacks, including pending animation
-frames, consume that same current layout. Repainting preserves the visible
-conversation and its offset; reload and leaving search can bring an off-window
-active conversation into view. This presentation cache does not acknowledge
-notifications or mutate session metadata.
+typography, theme or locale changes. Search query/title and content-preview text
+or visibility changes also invalidate a row's measurement, including offscreen
+rows. Scroll callbacks, including pending animation frames, consume that same
+current layout. Repainting preserves the visible conversation and its offset;
+reload and leaving search can bring an off-window active conversation into view
+using the rendered row's position, including preceding controls and date headers.
+This presentation cache does not acknowledge notifications or mutate session metadata.
 
 ## Client-side unread persistence (sidebar layer)
 

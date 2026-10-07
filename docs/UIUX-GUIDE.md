@@ -13,12 +13,14 @@ purely backend changes, use the runtime/state contracts instead.
 
 ## Sidebar lineage and selection
 
-Detailed rows with a separate lineage-summary line use the full rendered list,
-not fixed-height virtual spacers. The projected visible rows determine that mode
-on each render; the scroll scheduler uses the rendered list's mode, including
-when an earlier compact-mode callback is pending. Compact lists and Detailed
-rows without summaries retain the existing fixed-height virtualization. This
-bounded exception does not change the existing expanded-child/segment policy.
+Large lists remain virtualized in both Compact and Detailed density, including
+rows with lineage summaries. The rendered list owns measured row heights and
+prefix-sum spacers; unseen rows use plain/summary estimates until rendered.
+Measurements include expanded children/segments and localized wrapping, and are
+invalidated by layout or search-preview changes. Scroll callbacks use the current
+layout even when queued before a density change. Repainting preserves the top
+conversation and offset; off-window active anchoring uses rendered geometry so
+preceding controls and date-group headers are included.
 
 Child hover and selection use a neutral wash derived from the theme's text
 color, so it remains visible in both light and dark themes. Attention tint is

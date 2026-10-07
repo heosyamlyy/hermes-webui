@@ -8093,7 +8093,7 @@ function _sessionVirtualLayoutKey(list){
     ...Array.from(root.attributes,a=>a.name+'='+a.value),t('session_child_archived_short')].join('|');
 }
 
-function _sessionVirtualLayout(list, rows){
+function _sessionVirtualLayout(list, rows, query){
   const key=_sessionVirtualLayoutKey(list);
   let layout=list._sessionVirtualLayout;
   if(!layout||layout.key!==key) layout={key,measured:new Map(),estimates:[52,72]};
@@ -8102,8 +8102,11 @@ function _sessionVirtualLayout(list, rows){
   layout.rows=rows.map(row=>{
     const s=row.session,summary=Number(_sessionRowHasLineageSummary(s));
     const lineageKey=_sidebarLineageKeyForRow(s);
-    const shape=[summary,_sessionSegmentCount(s),s._child_session_count,
-      _expandedLineageKeys.has(lineageKey),_expandedChildSessionKeys.has(lineageKey)].join('|');
+    // Search can add/remove a preview without changing lineage. Include its
+    // text and title/query inputs so offscreen measurements cannot survive it.
+    const shape=JSON.stringify([summary,_sessionSegmentCount(s),s._child_session_count,
+      _expandedLineageKeys.has(lineageKey),_expandedChildSessionKeys.has(lineageKey),
+      query||'',query?_sessionDisplayTitle(s):'',_sessionSearchContentPreview(s,query)]);
     const id=s.session_id,old=previous.get(id);
     if(old&&old.shape===shape) layout.measured.set(id,old);
     return {id,shape,summary};
@@ -8822,7 +8825,7 @@ function renderSessionListFromCache(){
   }
   _ensureSessionVirtualScrollHandler(list);
   const previousVirtualLayout=list._sessionVirtualLayout;
-  const virtualLayout=_sessionVirtualLayout(list,flatSessionRows);
+  const virtualLayout=_sessionVirtualLayout(list,flatSessionRows,searchQueryRaw);
   const resizedAnchorIndex=previousVirtualLayout!==virtualLayout&&viewportAnchorBeforeRender
     ?flatSessionRows.findIndex(row=>row.session.session_id===viewportAnchorBeforeRender.id):-1;
   const renderedVirtualRows=[],virtualSpacers=[];
@@ -8923,7 +8926,13 @@ function renderSessionListFromCache(){
   }
   _measureSessionVirtualRows(list,virtualLayout,renderedVirtualRows,virtualSpacers);
   if(virtualAnchorScrollTop!==null){
-    virtualAnchorScrollTop=Math.max(0,virtualLayout.offsets[activeIndex]-list.clientHeight/2);
+    // The real row position includes controls and every preceding group header,
+    // which are not part of the session-height prefix sums.
+    const activeRow=renderedVirtualRows.find(row=>row.index===activeIndex);
+    if(activeRow){
+      const rect=activeRow.el.getBoundingClientRect();
+      virtualAnchorScrollTop=Math.max(0,list.scrollTop+rect.top-list.getBoundingClientRect().top-(list.clientHeight-rect.height)/2);
+    }
     list.scrollTop=virtualAnchorScrollTop;
   }else if(listScrollTopBeforeRender>0){
     // Always restore the user's scroll position after re-render, regardless
