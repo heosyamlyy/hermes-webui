@@ -9016,10 +9016,18 @@ function _rememberPreferencesSaved(payload){
 }
 
 function _applyWorkspaceTodosTabVisibility(){
+  // The in-chat task-list tray replaces every other Todos surface, so while it
+  // is on it also owns the workspace-panel Todos tab and hides that setting —
+  // otherwise the two controls contradict each other (reviewer re-gate
+  // 2026-10-07T18:08:02Z).
+  const trayOn=(typeof chatTodosEnabled==='function')&&chatTodosEnabled();
+  const want=!!window._workspaceTodosTab&&!trayOn;
   const tab=$('workspaceTodosTab');
-  if(tab) tab.hidden=!window._workspaceTodosTab;
+  if(tab) tab.hidden=!want;
+  const field=$('settingsWorkspaceTodosTabField');
+  if(field) field.hidden=trayOn;
   const rp=document.querySelector('.rightpanel');
-  if(!window._workspaceTodosTab && rp && rp.dataset.activeTab==='todos'){
+  if(!want && rp && rp.dataset.activeTab==='todos'){
     if(typeof switchWorkspacePanelTab==='function') switchWorkspacePanelTab('files');
   }
 }
@@ -9256,25 +9264,22 @@ async function loadSettingsPanel(){
       };
     }
     const endlessScrollCb=$('settingsSessionEndlessScroll');
-        if(endlessScrollCb){
-          endlessScrollCb.checked=!!settings.session_endless_scroll;
-          window._sessionEndlessScrollEnabled=endlessScrollCb.checked;
-          endlessScrollCb.onchange=function(){
-            window._sessionEndlessScrollEnabled=this.checked;
-            _scheduleAppearanceAutosave();
-          };
-        }
-        const chatTodosCb=$('settingsChatTodosInChat');
-        if(chatTodosCb){
-          chatTodosCb.checked=!!(typeof chatTodosEnabled==='function'&&chatTodosEnabled());
-          chatTodosCb.onchange=function(){
-            if(typeof _chatTodosToggleEnabled==='function') _chatTodosToggleEnabled(this.checked);
-            _scheduleAppearanceAutosave();
-          };
-        }
-        if(typeof _syncChatTodosAlignRadios==='function'&&typeof _chatTodosReadAlign==='function'){
-          _syncChatTodosAlignRadios(_chatTodosReadAlign());
-        }
+    if(endlessScrollCb){
+      endlessScrollCb.checked=!!settings.session_endless_scroll;
+      window._sessionEndlessScrollEnabled=endlessScrollCb.checked;
+      endlessScrollCb.onchange=function(){
+        window._sessionEndlessScrollEnabled=this.checked;
+        _scheduleAppearanceAutosave();
+      };
+    }
+    const chatTodosCb=$('settingsChatTodosInChat');
+    if(chatTodosCb){
+      chatTodosCb.checked=!!(typeof chatTodosEnabled==='function'&&chatTodosEnabled());
+      chatTodosCb.onchange=function(){
+        if(typeof _chatTodosToggleEnabled==='function') _chatTodosToggleEnabled(this.checked);
+        _scheduleAppearanceAutosave();
+      };
+    }
     const autoScrollFollowCb=$('settingsAutoScrollFollow');
     if(autoScrollFollowCb){
       autoScrollFollowCb.checked=settings.auto_scroll_follow!==false;

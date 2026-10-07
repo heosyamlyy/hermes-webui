@@ -10490,6 +10490,18 @@ function _syncChatTodosRailVisibility(){
       switchPanel('chat',{fromRailClick:false});
     }
   }
+  // The workspace-panel Todos tab (Settings ▸ "Show Todos tab in workspace
+  // panel") is a third Todos surface: it must follow the tray too, otherwise
+  // the two settings contradict each other (reviewer re-gate 2026-10-07T18:08:02Z).
+  if(typeof _applyWorkspaceTodosTabVisibility==='function') _applyWorkspaceTodosTabVisibility();
+}
+// The tray is an in-flow strip, so the shell carries a marker class while it is
+// visible. CSS uses it to drop the floating Start jump pill below the strip
+// instead of letting it paint over the tray (reviewer re-gate 2026-10-07T18:08:02Z).
+function _syncChatTodosShellClass(visible){
+  if(typeof document==='undefined'||!document.querySelector) return;
+  const shell=document.querySelector('.messages-shell');
+  if(shell&&shell.classList) shell.classList.toggle('chat-todos-visible',!!visible);
 }
 function _syncChatTodosExpanded(open){
   const tray=$('chatTodosPanel');
@@ -10523,32 +10535,7 @@ function _chatTodosToggleEnabled(checked){
   if(typeof _scheduleAppearanceAutosave==='function') _scheduleAppearanceAutosave();
 }
 
-// ── Chat todos alignment (left / center / right), localStorage-backed ──
-const CHAT_TODOS_ALIGN_LS_KEY='hermes-webui-chat-todos-align';
-function _chatTodosReadAlign(){
-  try{
-    const v=localStorage.getItem(CHAT_TODOS_ALIGN_LS_KEY);
-    return (v==='center'||v==='right')?v:'left';  // default: left (avoids the right-side outline/jump buttons)
-  }catch(_){return 'left';}
-}
-function _applyChatTodosAlign(align){
-  const tray=$('chatTodosPanel');
-  if(!tray) return;
-  tray.dataset.align=(align==='center'||align==='right')?align:'left';
-}
-function _pickChatTodosAlign(align){
-  const a=(align==='center'||align==='right')?align:'left';
-  try{localStorage.setItem(CHAT_TODOS_ALIGN_LS_KEY,a);}catch(_){}
-  _applyChatTodosAlign(a);
-  _syncChatTodosAlignRadios(a);
-  if(typeof _scheduleAppearanceAutosave==='function') _scheduleAppearanceAutosave();
-}
-function _syncChatTodosAlignRadios(value){
-  if(typeof document==='undefined') return;
-  document.querySelectorAll('input[name="chatTodosAlign"]').forEach(function(el){
-    el.checked=(el.value===value);
-  });
-}
+// ── Chat todos summary ──────────────────────────────────────────────────
 function _currentTodos(){
   // `todoStateMeta` is the sentinel for an explicit snapshot (live todo_state
   // SSE or session cold-load). Without it, S.todos may hold the empty array
@@ -10578,23 +10565,24 @@ function renderChatTodos(){
   if(!tray) return;
   if(!chatTodosEnabled()){
     tray.hidden=true;
+    _syncChatTodosShellClass(false);
     return;
   }
   const todos=_currentTodos();
   if(!todos.length){
     tray.hidden=true;
+    _syncChatTodosShellClass(false);
     return;
   }
   tray.hidden=false;
+  _syncChatTodosShellClass(true);
+  // ONE progress label (reviewer re-gate 2026-10-07T18:08:02Z): the header
+  // used to print the active count twice (summary + counter). The summary span
+  // is generated text, so it also no longer carries data-i18n and is filled
+  // here for every locale.
   const summary=_chatTodosSummary(todos);
   const summaryEl=$('chatTodosSummary');
   if(summaryEl) summaryEl.textContent=summary.text;
-  const counterEl=$('chatTodosCounter');
-  if(counterEl){
-    const active=summary.active;
-    counterEl.textContent=active>0?t('todos_tray_open_count',active):'';
-    counterEl.style.display=active>0?'':'none';
-  }
   if(!tray.classList.contains('open')){
     // Collapsed: header only. Render body lazily when expanded.
     return;
@@ -10627,18 +10615,17 @@ function _initChatTodos(){
   if(typeof document==='undefined') return;
   _chatTodosEnabled=chatTodosEnabled();
   _syncChatTodosRailVisibility();
-  _applyChatTodosAlign(_chatTodosReadAlign());
-  _syncChatTodosAlignRadios(_chatTodosReadAlign());
   const tray=$('chatTodosPanel');
   if(tray){
     if(!chatTodosEnabled()){
       tray.hidden=true;
+      _syncChatTodosShellClass(false);
       return;
     }
     tray.hidden=false;
-        // Desktop: tray floats; start collapsed so it never blocks the message
-        // stream. Users expand on demand (mobile keeps the same collapsed start).
-        renderChatTodos();
+    // In-flow strip: start collapsed so it costs only the ~35px header band.
+    _syncChatTodosShellClass(true);
+    renderChatTodos();
   }
 }
 

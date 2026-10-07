@@ -29,8 +29,10 @@ def test_chat_todos_tray_markup_exists_in_message_shell():
     assert 'id="chatTodosPanel"' in idx
     assert 'id="chatTodosHead"' in idx
     assert 'id="chatTodosSummary"' in idx
-    assert 'id="chatTodosCounter"' in idx
     assert 'id="chatTodosBody"' in idx
+    # ONE progress label (reviewer re-gate 2026-10-07T18:08:02Z): the separate
+    # counter span duplicated the same active count, so it must be gone.
+    assert 'id="chatTodosCounter"' not in idx
     # The tray must live inside the messages shell, before the messages node,
     # so it stays pinned at the top of the chat area (not inside the scroller).
     shell = idx.find('class="messages-shell"')
@@ -162,7 +164,7 @@ def test_chat_todos_toggle_off_then_on_clears_aria_expanded():
     # again removed `open` but left aria-expanded="true" on the header.
     ui = _read_static("static/ui.js")
     start = ui.find("function _chatTodosToggleEnabled(")
-    end = ui.find("function _chatTodosReadAlign", start)
+    end = ui.find("function _chatTodosSummary(", start)
     assert start != -1 and end != -1
     block = ui[start:end]
 
@@ -173,11 +175,11 @@ def test_chat_todos_toggle_off_then_on_clears_aria_expanded():
 
 def test_chat_todos_toggle_does_not_rebuild_the_transcript():
     # [SHOULD-FIX] "Turning the tray on re-renders the whole transcript ...
-    # took 256 ms at 300 messages." The tray is an absolutely positioned
-    # overlay, so toggling it must not call renderMessages().
+    # took 256 ms at 300 messages." The tray is an independent strip, so
+    # toggling it must not call renderMessages().
     ui = _read_static("static/ui.js")
     start = ui.find("function _chatTodosToggleEnabled(")
-    end = ui.find("function _chatTodosReadAlign", start)
+    end = ui.find("function _chatTodosSummary(", start)
     assert start != -1 and end != -1
     block = ui[start:end]
 
@@ -210,14 +212,31 @@ def test_chat_todos_tray_strings_are_localized():
 
     assert "t('todos_tray_summary_done',total)" in block
     assert "t('todos_tray_summary_active',active,total)" in block
-    assert "t('todos_tray_open_count',active)" in block
     # No hardcoded English summaries survive.
     assert "'All done'" not in block
     assert "running`" not in block
 
     idx = _read_static("static/index.html")
-    # The radiogroup label is translated too.
-    assert 'aria-label="Task list alignment" data-i18n-aria-label="settings_label_chat_todos_align"' in idx
+    # ONE progress label: the summary span is generated text, so applyLocaleToDOM
+    # must not own it — no data-i18n on it (reviewer re-gate 2026-10-07T18:08:02Z)
+    # — and the duplicated counter span is gone.
+    assert 'id="chatTodosSummary" data-i18n' not in idx
+    assert 'id="chatTodosCounter"' not in idx
+    assert "todos_tray_open_count" not in ui
+    assert "todos_tray_open_count" not in _read_static("static/i18n.js")
+
+
+def test_chat_todos_closed_chevron_points_down():
+    # Every other collapsed disclosure in the app points down when closed
+    # (reviewer re-gate 2026-10-07T18:08:02Z).
+    idx = _read_static("static/index.html")
+    head = idx[idx.find('id="chatTodosChevron"') :]
+    snippet = head[: head.find("</span>")]
+    assert '<polyline points="6 9 12 15 18 9"/>' in snippet  # down when closed
+    assert '<polyline points="18 15 12 9 6 15"/>' not in snippet
+    css = _read_static("static/style.css")
+    # ...and it flips to up when the tray is open.
+    assert ".chat-todos.open .chat-todos-chevron{transform:rotate(180deg);}" in css
 
 
 def test_chat_todos_chip_reflects_the_tray_forced_hide():
@@ -256,14 +275,9 @@ def test_chat_todos_i18n_keys_in_all_locales():
     expected = {
         "settings_label_chat_todos_in_chat",
         "settings_desc_chat_todos_in_chat",
-        "settings_label_chat_todos_align",
-        "settings_option_chat_todos_align_left",
-        "settings_option_chat_todos_align_center",
-        "settings_option_chat_todos_align_right",
         # Tray strings moved behind t() (maintainer review 2026-10-07).
         "todos_tray_summary_active",
         "todos_tray_summary_done",
-        "todos_tray_open_count",
     }
     # LOCALES segmentation: each locale starts at "  <code>: {" and ends before
     # the next locale header. Using header boundaries avoids a fragile
@@ -285,21 +299,63 @@ def test_chat_todos_i18n_keys_in_all_locales():
         assert not missing, f"{locale_key} missing chat-todos keys: {missing}"
 
 
-def test_chat_todos_desktop_does_not_push_message_stream():
-    # Desktop tray is absolutely positioned above the messages so the transcript
-    # never wastes the vertical band beside the tray. Mobile falls back to
-    # static in-flow layout. This is a screenshot gate: the assertions bind
-    # the visual contract the screenshot verifies.
+def test_chat_todos_desktop_tray_is_an_in_flow_strip():
+    # Reviewer re-gate 2026-10-07T18:08:02Z: "Put the desktop tray in the flow,
+    # like the phone layout already is." A collapsed ~35px strip owns the top
+    # band of .messages-shell and pushes the scroller down; nothing floats over
+    # the transcript and the alignment variants are gone.
     css = _read_static("static/style.css")
-    # Desktop: absolute, out-of-flow; alignment variants via data-align.
-    assert ".chat-todos{position:absolute;" in css
-    assert ".chat-todos[data-align=\"center\"]{left:50%;" in css
-    assert ".chat-todos[data-align=\"right\"]{left:auto;right:16px;" in css
-    # Mobile: back to static full-width in-flow so phones read naturally.
-    assert "@media(max-width:768px)" in css
-    mobile_block_start = css.find("@media(max-width:768px)")
-    mobile_block = css[mobile_block_start : mobile_block_start + 1200]
-    assert ".chat-todos{position:static;" in mobile_block
+    assert ".chat-todos{flex:0 0 auto;width:100%;" in css
+    assert ".chat-todos{position:absolute" not in css
+    assert "data-align" not in css
+    assert (
+        ".chat-todos-head{display:flex;align-items:center;gap:8px;width:100%;min-height:35px;" in css
+    )
+    # Expanded, the body grows in place inside the same flex item.
+    assert (
+        ".chat-todos-body{max-height:240px;overflow-y:auto;border-top:1px solid var(--border);" in css
+    )
+    # The floating Start jump pill is anchored to the shell's top-right, so it
+    # must drop below the strip instead of painting over it.
+    assert ".messages-shell.chat-todos-visible #jumpToSessionStartBtn{top:43px;}" in css
+    # The shell marker class is driven from the render path, not by hand.
+    ui = _read_static("static/ui.js")
+    assert "function _syncChatTodosShellClass(visible){" in ui
+    assert "shell.classList.toggle('chat-todos-visible',!!visible)" in ui
+
+
+def test_chat_todos_desktop_has_no_alignment_setting():
+    # Reviewer re-gate 2026-10-07T18:08:02Z: "Drop the alignment setting."
+    idx = _read_static("static/index.html")
+    ui = _read_static("static/ui.js")
+    panels = _read_static("static/panels.js")
+    for src in (idx, ui, panels):
+        assert "chatTodosAlign" not in src
+        assert "_pickChatTodosAlign" not in src
+        assert "_syncChatTodosAlignRadios" not in src
+    assert "chat-todos-align-group" not in idx
+    assert "hermes-webui-chat-todos-align" not in ui
+
+
+def test_workspace_todos_tab_follows_the_in_chat_tray():
+    # Reviewer re-gate 2026-10-07T18:08:02Z, item 6: while the in-chat tray is
+    # on, the workspace "Show Todos tab" surface must follow it so the two
+    # settings cannot contradict each other.
+    panels = _read_static("static/panels.js")
+    start = panels.find("function _applyWorkspaceTodosTabVisibility(){")
+    assert start != -1
+    end = panels.find("\nfunction ", start + 10)
+    assert end != -1
+    block = panels[start:end]
+    assert "const trayOn=(typeof chatTodosEnabled==='function')&&chatTodosEnabled();" in block
+    assert "const want=!!window._workspaceTodosTab&&!trayOn;" in block
+    assert "if(tab) tab.hidden=!want;" in block
+    assert "settingsWorkspaceTodosTabField" in block
+    # ui.js re-applies it whenever the tray preference changes.
+    ui = _read_static("static/ui.js")
+    assert "_applyWorkspaceTodosTabVisibility()" in ui
+    idx = _read_static("static/index.html")
+    assert 'id="settingsWorkspaceTodosTabField"' in idx
 
 
 def test_rail_hide_helper_does_not_clobber_a_user_hidden_tab():
@@ -473,7 +529,6 @@ def test_chat_todos_locales_keep_diacritics():
         "attivo": "it",
         "área": "es",
         "duplicación": "es",
-        "Alineación": "es",
         "recolhível": "pt",
         "duplicação": "pt",
         "tâches": "fr",
@@ -481,19 +536,14 @@ def test_chat_todos_locales_keep_diacritics():
         "latérale": "fr",
         "úkolů": "cs",
         "sbalitelný": "cs",
-        "Zarovnání": "cs",
         "duplicitě": "cs",
         "üst kısmında": "tr",
         "görev": "tr",
         "önlemek": "tr",
         "Pokaż": "pl",
         "Wyświetla": "pl",
-        "Wyrównanie": "pl",
-        "Środek": "pl",
         "bảng Todos": "vi",
         "trùng lặp": "vi",
-        "Căn chỉnh": "vi",
-        "Giữa": "vi",
     }
     for needle, locale in required.items():
         assert needle in src, f"{locale} lost its diacritics: {needle!r}"
@@ -517,7 +567,7 @@ def test_chat_todos_settings_toggle_repaints_the_visibility_chips():
     # so the chip must be re-rendered whenever the tray preference changes.
     ui = _read_static("static/ui.js")
     start = ui.find("function _chatTodosToggleEnabled(checked){")
-    end = ui.find("// \u2500\u2500 Chat todos alignment", start)
+    end = ui.find("function _chatTodosSummary(", start)
     assert start != -1 and end != -1, "missing _chatTodosToggleEnabled block"
     handler = ui[start:end]
     enable_at = handler.find("_setChatTodosEnabled(checked);")
@@ -589,7 +639,7 @@ console.log('ok');
 def test_chat_todos_toggle_repaints_chips_probe(tmp_path):
     ui = _read_static("static/ui.js")
     helper = _extract(
-        ui, "function _chatTodosToggleEnabled(checked){", "// \u2500\u2500 Chat todos alignment"
+        ui, "function _chatTodosToggleEnabled(checked){", "function _chatTodosSummary("
     )
     script = _TOGGLE_CHIPS_PROBE.replace("__HELPER__", helper)
     assert _run_node(tmp_path, "toggle_chips_probe.js", script).strip() == "ok"
