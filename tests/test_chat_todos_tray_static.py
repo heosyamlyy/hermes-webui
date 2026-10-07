@@ -316,12 +316,25 @@ def test_chat_todos_desktop_tray_is_an_in_flow_strip():
         ".chat-todos-body{max-height:240px;overflow-y:auto;border-top:1px solid var(--border);" in css
     )
     # The floating Start jump pill is anchored to the shell's top-right, so it
-    # must drop below the strip instead of painting over it.
-    assert ".messages-shell.chat-todos-visible #jumpToSessionStartBtn{top:43px;}" in css
-    # The shell marker class is driven from the render path, not by hand.
+    # must drop below the strip instead of painting over it — by the strip's
+    # LIVE height, because a fixed offset only cleared the collapsed band and
+    # let the pill cover the expanded task rows (re-gate 2026-10-07T20:13:25Z).
+    assert (
+        ".messages-shell.chat-todos-visible #jumpToSessionStartBtn{top:calc(var(--chat-todos-h,36px) + 7px);}"
+        in css
+    )
+    # The shell marker class is driven from the render path, not by hand, and it
+    # also publishes the strip's measured height for that offset.
     ui = _read_static("static/ui.js")
     assert "function _syncChatTodosShellClass(visible){" in ui
     assert "shell.classList.toggle('chat-todos-visible',!!visible)" in ui
+    assert "shell.style.setProperty('--chat-todos-h',Math.round(h)+'px')" in ui
+    # The in-flow strip resizes the transcript, so every layout-changing path
+    # also re-pins the reader (re-gate 2026-10-07T20:13:25Z, [SILENT]).
+    assert "function _repinChatTodosTranscript(){" in ui
+    assert "_repinChatTodosTranscript();" in ui
+    assert ui.count("_repinChatTodosTranscript();") >= 5
+    assert "if(typeof _repinMessagesAfterComposerResize==='function') _repinMessagesAfterComposerResize();" in ui
 
 
 def test_chat_todos_desktop_has_no_alignment_setting():

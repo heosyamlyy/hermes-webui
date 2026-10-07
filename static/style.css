@@ -2291,8 +2291,12 @@
     .chat-todos-row .todos-meta{font-size:10.5px;color:var(--muted);opacity:.65;margin-top:1px;}
     .chat-todos-empty{font-size:12px;color:var(--muted);padding:8px 2px;}
     /* The floating Start jump pill is anchored to the shell's top-right; when
-       the tray strip occupies that band, drop the pill below it. */
-    .messages-shell.chat-todos-visible #jumpToSessionStartBtn{top:43px;}
+       the tray strip occupies that band, drop the pill below it. The strip's
+       LIVE height is published on the shell by _syncChatTodosShellClass, so the
+       pill also clears the EXPANDED tray — a fixed 43px assumed the collapsed
+       band and painted the pill inside the task rows (re-gate
+       2026-10-07T20:13:25Z, [SHOULD-FIX] 2). */
+    .messages-shell.chat-todos-visible #jumpToSessionStartBtn{top:calc(var(--chat-todos-h,36px) + 7px);}
     @media(prefers-reduced-motion:reduce){.chat-todos-head{transition:none;}.chat-todos-chevron{transition:none;}}
     @media(max-width:768px){
       .chat-todos-head{padding:0 10px;}

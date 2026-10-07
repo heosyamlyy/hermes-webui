@@ -10501,7 +10501,22 @@ function _syncChatTodosRailVisibility(){
 function _syncChatTodosShellClass(visible){
   if(typeof document==='undefined'||!document.querySelector) return;
   const shell=document.querySelector('.messages-shell');
-  if(shell&&shell.classList) shell.classList.toggle('chat-todos-visible',!!visible);
+  if(shell&&shell.classList){
+    shell.classList.toggle('chat-todos-visible',!!visible);
+    // The strip's height changes with expansion and with the task count, so
+    // publish the LIVE height on the shell: CSS offsets the Start jump pill by
+    // it instead of the fixed 43px that only cleared the collapsed band and let
+    // the pill paint inside the expanded rows (re-gate 2026-10-07T20:13:25Z,
+    // [SHOULD-FIX] 2).
+    if(!visible){
+      if(shell.style&&shell.style.removeProperty) shell.style.removeProperty('--chat-todos-h');
+      return;
+    }
+    const tray=(typeof $==='function')?$('chatTodosPanel'):null;
+    let h=0;
+    try{ h=(tray&&tray.getBoundingClientRect)?tray.getBoundingClientRect().height:0; }catch(_){ h=0; }
+    if(h>0&&shell.style&&shell.style.setProperty) shell.style.setProperty('--chat-todos-h',Math.round(h)+'px');
+  }
 }
 function _syncChatTodosExpanded(open){
   const tray=$('chatTodosPanel');
@@ -10559,6 +10574,14 @@ function _chatTodosSummary(todos){
     :t('todos_tray_summary_active',active,total);
   return {text,active,total};
 }
+function _repinChatTodosTranscript(){
+  // The tray is IN FLOW, so showing/hiding/growing it resizes the transcript
+  // box. Without re-pinning, expanding the tray silently drops the latest
+  // message out of view while the app still believes the reader is pinned
+  // (re-gate 2026-10-07T20:13:25Z, [SILENT]). The helper is a no-op when the
+  // reader scrolled away or is already parked at the bottom.
+  if(typeof _repinMessagesAfterComposerResize==='function') _repinMessagesAfterComposerResize();
+}
 function renderChatTodos(){
   if(typeof $!=='function'||typeof document==='undefined') return;
   const tray=$('chatTodosPanel');
@@ -10566,16 +10589,19 @@ function renderChatTodos(){
   if(!chatTodosEnabled()){
     tray.hidden=true;
     _syncChatTodosShellClass(false);
+    _repinChatTodosTranscript();
     return;
   }
   const todos=_currentTodos();
   if(!todos.length){
     tray.hidden=true;
     _syncChatTodosShellClass(false);
+    _repinChatTodosTranscript();
     return;
   }
   tray.hidden=false;
   _syncChatTodosShellClass(true);
+  _repinChatTodosTranscript();
   // ONE progress label (reviewer re-gate 2026-10-07T18:08:02Z): the header
   // used to print the active count twice (summary + counter). The summary span
   // is generated text, so it also no longer carries data-i18n and is filled
@@ -10601,6 +10627,11 @@ function renderChatTodos(){
     </div>`;
   }).join('');
   body.innerHTML=rows||`<div class="chat-todos-empty">${esc(t('todos_no_active'))}</div>`;
+  // The expanded body's height depends on the row count (and growing a list is
+  // the case the reviewer measured a 199px gap on), so re-publish the strip
+  // height for the Start pill and re-pin the transcript to its new bottom.
+  _syncChatTodosShellClass(true);
+  _repinChatTodosTranscript();
 }
 function toggleChatTodos(){
   const tray=$('chatTodosPanel');
@@ -10608,6 +10639,12 @@ function toggleChatTodos(){
   const isOpen=!tray.classList.contains('open');
   _syncChatTodosExpanded(isOpen);
   if(isOpen) renderChatTodos();
+  // Expanding/collapsing resizes the in-flow strip, so refresh the published
+  // height (Start pill offset) and re-pin the transcript on BOTH transitions —
+  // collapsing must not leave the scroller short either (re-gate
+  // 2026-10-07T20:13:25Z).
+  _syncChatTodosShellClass(!tray.hidden);
+  _repinChatTodosTranscript();
 }
 function _initChatTodos(){
   if(_chatTodosInitialised) return;
