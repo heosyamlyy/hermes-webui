@@ -47,7 +47,7 @@ function t(key, value){
   if(key==='session_meta_children') return value+' children';
   if(key==='session_child_toggle_hint') return value+' (click to show or hide)';
   if(key==='session_child_archived') return 'Child sessions (archived)';
-  if(key==='session_child_archived_short') return 'Archived';
+  if(key==='session_child_archived_short') return 'Archived child';
   if(key==='session_child_attention') return 'Child session: '+value;
   if(key==='session_child_open') return 'Open child session';
   if(key==='session_child_running') return 'Child session is running';

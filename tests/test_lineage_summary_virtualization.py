@@ -1,4 +1,4 @@
-"""Fixed-height window opt-out and its rendered-list scroll ownership."""
+"""Measured-height windows and rendered-list scroll ownership."""
 import json
 import shutil
 import subprocess
@@ -33,15 +33,22 @@ function requestAnimationFrame(cb){callbacks.push(cb);return callbacks.length;}
     return json.loads(result.stdout)
 
 
-def test_variable_height_rows_have_no_fixed_height_spacers():
+def test_variable_height_rows_use_prefix_sum_spacers():
     result = run_js("""
-const variable=_sessionVirtualWindow({total:120,scrollTop:1000,viewportHeight:520,variableHeight:true});
+const offsets=[0];
+for(let i=0;i<120;i++)offsets.push(offsets.at(-1)+(i%3===0?96:52));
+const variable=_sessionVirtualWindow({total:120,scrollTop:1000,viewportHeight:520,offsets,variableHeight:true});
 const compact=_sessionVirtualWindow({total:120,scrollTop:1000,viewportHeight:520});
 console.log(JSON.stringify({variable,compact}));
 """)
-    assert result['variable']['virtualized'] is False, 'Detailed lineage summaries cannot use 52px spacers'
-    assert (result['variable']['start'], result['variable']['end']) == (0, 120)
-    assert result['variable']['topPad'] == result['variable']['bottomPad'] == 0
+    variable = result['variable']
+    assert variable['virtualized'] is True, 'Detailed lineage summaries must stay windowed'
+    assert variable['end'] - variable['start'] < 40
+    offsets = [0]
+    for i in range(120):
+        offsets.append(offsets[-1] + (96 if i % 3 == 0 else 52))
+    assert variable['topPad'] == offsets[variable['start']]
+    assert variable['bottomPad'] == offsets[120] - offsets[variable['end']]
     assert result['compact']['virtualized'] is True
     assert result['compact']['end'] - result['compact']['start'] < 120
 

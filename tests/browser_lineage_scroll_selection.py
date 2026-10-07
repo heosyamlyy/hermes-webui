@@ -28,6 +28,9 @@ def script(source):
              '_markSessionListPointerDown', '_markSessionListPointerUp',
              '_resyncSessionVirtualWindowAfterRender']
 
+    for name in ['_sessionVirtualLayoutKey','_sessionVirtualLayout','_sessionVirtualOffsets','_sessionVirtualViewportAnchor','_measureSessionVirtualRows']:
+        if 'function '+name+'(' in source:
+            names.append(name)
     functions = '\n'.join(re.search(r'^function ' + n + r'\(.*?^\}', source, re.M | re.S).group() for n in names)
     constants = '\n'.join(re.search(r'^const ' + n + r'\s*=.*?;', source, re.M).group() for n in [
         'SESSION_VIRTUAL_ROW_HEIGHT', 'SESSION_VIRTUAL_BUFFER_ROWS', 'SESSION_VIRTUAL_THRESHOLD_ROWS'])
@@ -47,7 +50,8 @@ let groups=[],renderCount=0;
 function repaint(){
  renderCount++;
  const list=document.querySelector('#sessionList'),listScrollTopBeforeRender=list.scrollTop;
- const q='', searchQueryRaw='',activeSidForSidebar='other';
+ const q='', searchQueryRaw='';
+ const viewportAnchorBeforeRender=typeof _sessionVirtualViewportAnchor==='function'?_sessionVirtualViewportAnchor(list):null;
  list.replaceChildren();
 """ + source[start:end] + r"""
 }
@@ -57,8 +61,8 @@ function scene(density='detailed',kind='children'){
  fixtureSessions=[];
  for(let i=0;i<120;i++){
   const parent={session_id:'p'+i,title:'Conversation '+i,message_count:3,updated_at:120-i,has_unread:i===0,
-   _compression_segment_count:kind==='plain'?0:4,
-   _lineage_segments:kind==='plain'?[]:Array.from({length:4},(_,j)=>({session_id:'prior'+i+'-'+j,title:'Earlier turn '+j,updated_at:j+1}))};
+   _compression_segment_count:kind==='plain'||(kind==='sparse'&&i!==17)?0:4,
+   _lineage_segments:kind==='plain'||(kind==='sparse'&&i!==17)?[]:Array.from({length:4},(_,j)=>({session_id:'prior'+i+'-'+j,title:'Earlier turn '+j,updated_at:j+1}))};
   const child={session_id:'c'+i,title:'Child task '+i,message_count:3,parent_session_id:'p'+i,
    relationship_type:'child_session',raw_source:'subagent',session_source:'other',
    archived:kind==='reference',is_streaming:i===1,attention:{kind:'approval',count:1}};
@@ -105,10 +109,12 @@ def main():
             page.add_script_tag(content=script(source('static/sessions.js')))
             page.add_script_tag(content=source('static/i18n.js'))
             page.evaluate('document.documentElement.dataset.skin="graphite"')
-            for kind in ['children', 'reference']:
+            for kind in ['children', 'reference', 'sparse']:
                 page.evaluate('k=>scene("detailed",k)', kind)
                 summary_count = page.locator('.session-lineage-summary').count()
                 assert summary_count > 0, 'Risky lineage summary must render'
+                if kind == 'sparse':
+                    assert summary_count == 1, 'Sparse fixture must have exactly one summary'
                 # Pause event delivery, not layout or the real RAF scheduler,
                 # to observe the content immediately before the scroll callback.
                 page.evaluate('_sessionVirtualScrollList.removeEventListener("scroll",_scheduleSessionVirtualizedRender)')
@@ -121,10 +127,16 @@ def main():
                 after = page.evaluate('visible()')
                 page.screenshot(path=str(args.output / f'{width}-{kind}-scroll-after.png'))
                 failures = []
-                if before['rows'] != after['rows'] or before['scrollTop'] != after['scrollTop']:
+                if (before['rows'][0] != after['rows'][0] or before['scrollTop'] != after['scrollTop']
+                        or any(row not in after['rows'] for row in before['rows'])):
                     failures.append('unchanged scrollTop skips visible conversation/offset')
-                if after['renders'] != before['renders']:
-                    failures.append('variable-height list rebuilt on scroll')
+                if page.locator('.session-date-body>.session-item').count() >= 80:
+                    failures.append('variable-height list must keep a bounded DOM window')
+                page.evaluate('activeSidForSidebar="p100";repaint()')
+                page.wait_for_timeout(40)
+                if not any(r['id'] == 'p100' for r in page.evaluate('visible()')['rows']):
+                    failures.append('active conversation not brought into view')
+                page.evaluate('activeSidForSidebar="other"')
                 page.evaluate('const l=document.querySelector("#sessionList");l.scrollTop=l.scrollHeight')
                 page.wait_for_timeout(100)
                 bottom = page.evaluate('visible()')
@@ -135,7 +147,7 @@ def main():
             for density, kind in [('compact','children'),('detailed','plain'),('detailed','childless'),('detailed','children')]:
                 page.evaluate('([d,k])=>scene(d,k)', [density,kind])
                 virtual = page.locator('.session-virtual-spacer').count() > 0
-                expected = not (density == 'detailed' and kind == 'children')
+                expected = True
                 results.append(dict(scene='mode',width=width,density=density,kind=kind,virtual=virtual,failures=[] if virtual==expected else ['wrong density/lineage virtualization mode']))
                 if density == 'compact':
                     page.evaluate('document.querySelector("#sessionList").scrollTop=1000')
@@ -145,6 +157,54 @@ def main():
                     page.evaluate('const l=document.querySelector("#sessionList");l.scrollTop=l.scrollHeight')
                     page.wait_for_timeout(80)
                     assert page.locator('.session-item[data-sid="p119"]').count() == 1
+            # Reload and return from search must bring an off-window active row
+            # into the viewport, not merely include it in the overscan DOM.
+            for entry in ['reload', 'search-return']:
+                page.evaluate('scene("detailed","children")')
+                page.evaluate('e=>{const l=document.querySelector("#sessionList");l.scrollTop=0;'
+                              'if(e==="reload")delete l.dataset.sessionVirtualActiveAnchor;'
+                              'else l.dataset.sessionVirtualFilter="filtered";'
+                              'activeSidForSidebar="p100";repaint()}', entry)
+                page.wait_for_timeout(80)
+                state = page.evaluate('visible()')
+                assert any(r['id'] == 'p100' for r in state['rows']), entry
+                results.append(dict(scene=entry,width=width,state=state,failures=[]))
+                page.evaluate('activeSidForSidebar="other"')
+            # A pending RAF must use the current measured layout after density,
+            # localized wrapping, width and typography have changed.
+            page.evaluate('scene("detailed","children");document.querySelector("#sessionList").scrollTop=1000')
+            page.wait_for_timeout(80)
+            page.evaluate('_scheduleSessionVirtualizedRender();window._sidebarDensity="compact";repaint()')
+            page.wait_for_timeout(80)
+            assert page.locator('.session-date-body>.session-item').count() < 80
+            page.evaluate('window._sidebarDensity="detailed";setLocale("pl");'
+                          'document.documentElement.dataset.fontSize="xlarge";'
+                          'document.documentElement.classList.add("dark");'
+                          'document.querySelector("#sessionList").style.width="180px";repaint()')
+            page.wait_for_timeout(80)
+            state = page.evaluate('visible()')
+            page.evaluate('_scheduleSessionVirtualizedRender()')
+            page.wait_for_timeout(80)
+            settled = page.evaluate('visible()')
+            assert state['rows'][0] == settled['rows'][0]
+            assert state['scrollTop'] == settled['scrollTop']
+            assert page.locator('.session-date-body>.session-item').count() < 80
+            heights = page.locator('.session-date-body>.session-item').evaluate_all('(els)=>els.map(e=>e.getBoundingClientRect().height)')
+            results.append(dict(scene='layout-transition',width=width,state=state,settled=settled,heights=heights,failures=[]))
+            page.evaluate('setLocale("en");delete document.documentElement.dataset.fontSize;'
+                          'document.documentElement.classList.remove("dark")')
+            page.evaluate('scene("detailed","children");_expandedChildSessionKeys.add("p0");'
+                          '_expandedLineageKeys.add("p5");repaint();'
+                          'document.querySelector("#sessionList").scrollTop=1000')
+            page.wait_for_timeout(80)
+            expanded_before = page.evaluate('visible()')
+            page.evaluate('repaint();_scheduleSessionVirtualizedRender()')
+            page.wait_for_timeout(80)
+            expanded_after = page.evaluate('visible()')
+            assert expanded_before['rows'][0] == expanded_after['rows'][0]
+            assert expanded_before['scrollTop'] == expanded_after['scrollTop']
+            assert page.locator('.session-date-body>.session-item').count() < 80
+            results.append(dict(scene='expanded-scroll',width=width,before=expanded_before,after=expanded_after,failures=[]))
             page.evaluate('scene("detailed","children")')
             parent = page.locator('.session-item[data-sid="p0"]')
             assert 'unread' in parent.get_attribute('class'), 'Parent unread must coexist with child attention'

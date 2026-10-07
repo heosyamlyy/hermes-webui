@@ -303,11 +303,22 @@ Hover and selection backgrounds take precedence while the attention accent and
 status mark remain visible. Running and unread retain a plain status mark; concurrent unread
 completion remains in the chip tooltip and accessible name when running or
 attention takes visual precedence. A reference-only chip uses a localized
-short archived label, keeps the full archived explanation in its tooltip and
+short child-qualified archived label, keeps the full archived explanation in its tooltip and
 accessible name, and is not an expander.
 Fork and delegated row indicators are both 14px; delegated navigation targets
 are at least 44px tall on narrow layouts or coarse pointers, while fine-pointer
 desktop rows remain compact.
+
+Large sidebars remain windowed in both densities, including compressed parents
+with child summaries. The rendered list owns transient row-height measurements
+and prefix-sum spacers; unseen rows use plain/summary height estimates until they
+enter the window. Measurements include wrapped localized summaries and expanded
+descendants, are pruned with the current rows, and are invalidated by layout,
+typography, theme or locale changes. Scroll callbacks, including pending animation
+frames, consume that same current layout. Repainting preserves the visible
+conversation and its offset; reload and leaving search can bring an off-window
+active conversation into view. This presentation cache does not acknowledge
+notifications or mutate session metadata.
 
 ## Client-side unread persistence (sidebar layer)
 

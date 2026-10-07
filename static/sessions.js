@@ -8045,8 +8045,25 @@ function _sessionVirtualWindow(opts){
   const buffer=Math.max(0, Number(opts&&opts.buffer)||SESSION_VIRTUAL_BUFFER_ROWS);
   const viewportHeight=Math.max(itemHeight, Number(opts&&opts.viewportHeight)||itemHeight*10);
   const visibleRows=Math.max(1, Math.ceil(viewportHeight/itemHeight));
-  if(total<=threshold||(opts&&opts.variableHeight)){
+  if(total<=threshold){
     return {virtualized:false,start:0,end:total,topPad:0,bottomPad:0,itemHeight,total};
+  }
+  const offsets=opts&&opts.offsets;
+  if(offsets&&offsets.length===total+1){
+    const rowAt=(y)=>{
+      let lo=0,hi=total;
+      while(lo<hi){const mid=(lo+hi+1)>>1;if(offsets[mid]<=y)lo=mid;else hi=mid-1;}
+      return Math.min(lo,total-1);
+    };
+    const scrollTop=Math.max(0,Number(opts.scrollTop)||0);
+    let start=Math.max(0,rowAt(scrollTop)-buffer);
+    let end=Math.min(total,rowAt(scrollTop+viewportHeight)+1+buffer);
+    const activeIndex=Number.isFinite(Number(opts.activeIndex))?Number(opts.activeIndex):-1;
+    if(activeIndex>=0&&activeIndex<total&&(activeIndex<start||activeIndex>=end)){
+      start=Math.max(0,activeIndex-buffer);
+      end=Math.min(total,rowAt(offsets[start]+viewportHeight)+1+buffer*2);
+    }
+    return {virtualized:true,start,end,topPad:offsets[start],bottomPad:offsets[total]-offsets[end],itemHeight,total};
   }
   let start=Math.floor((Number(opts&&opts.scrollTop)||0)/itemHeight)-buffer;
   start=Math.max(0, Math.min(start, Math.max(0,total-visibleRows)));
@@ -8065,6 +8082,68 @@ function _sessionVirtualWindow(opts){
     itemHeight,
     total,
   };
+}
+
+// Measurements belong to the rendered list, not the session cache. Unseen rows
+// use measured plain/summary estimates; each real row replaces its estimate on
+// entry. Width, typography, theme and locale changes invalidate those measurements.
+function _sessionVirtualLayoutKey(list){
+  const root=document.documentElement;
+  return [list.clientWidth,window._sidebarDensity,root.className,
+    ...Array.from(root.attributes,a=>a.name+'='+a.value),t('session_child_archived_short')].join('|');
+}
+
+function _sessionVirtualLayout(list, rows){
+  const key=_sessionVirtualLayoutKey(list);
+  let layout=list._sessionVirtualLayout;
+  if(!layout||layout.key!==key) layout={key,measured:new Map(),estimates:[52,72]};
+  const previous=layout.measured;
+  layout.measured=new Map();
+  layout.rows=rows.map(row=>{
+    const s=row.session,summary=Number(_sessionRowHasLineageSummary(s));
+    const lineageKey=_sidebarLineageKeyForRow(s);
+    const shape=[summary,_sessionSegmentCount(s),s._child_session_count,
+      _expandedLineageKeys.has(lineageKey),_expandedChildSessionKeys.has(lineageKey)].join('|');
+    const id=s.session_id,old=previous.get(id);
+    if(old&&old.shape===shape) layout.measured.set(id,old);
+    return {id,shape,summary};
+  });
+  _sessionVirtualOffsets(layout);
+  list._sessionVirtualLayout=layout;
+  return layout;
+}
+
+function _sessionVirtualOffsets(layout){
+  layout.offsets=[0];
+  for(const row of layout.rows){
+    const measured=layout.measured.get(row.id);
+    layout.offsets.push(layout.offsets.at(-1)+(measured?measured.height:layout.estimates[row.summary]));
+  }
+}
+
+function _sessionVirtualViewportAnchor(list){
+  const top=list.getBoundingClientRect().top;
+  for(const el of list.querySelectorAll('.session-date-body>.session-item')){
+    const rect=el.getBoundingClientRect();
+    if(rect.bottom>top&&rect.top<top+list.clientHeight) return {id:el.dataset.sid,y:rect.top-top};
+  }
+  return null;
+}
+
+function _measureSessionVirtualRows(list, layout, rendered, spacers){
+  // Read all geometry before writing spacers, avoiding a layout per row.
+  const heights=rendered.map(({el,index})=>({el,index,height:el.getBoundingClientRect().height+
+    (parseFloat(getComputedStyle(el).marginBottom)||0)}));
+  for(const {el,index,height} of heights){
+    if(height<=0) continue;
+    const row=layout.rows[index];
+    layout.measured.set(row.id,{shape:row.shape,height});
+    // Expanded descendants are part of this row's measured height, but must
+    // not inflate the estimate for unrelated collapsed conversations.
+    if(!el.querySelector('.session-child-session,.session-lineage-segment')) layout.estimates[row.summary]=height;
+  }
+  _sessionVirtualOffsets(layout);
+  for(const {el,start,end} of spacers) el.style.height=(layout.offsets[end]-layout.offsets[start])+'px';
 }
 
 function _sessionVirtualSpacer(height, where){
@@ -8101,6 +8180,7 @@ function _scheduleSessionVirtualizedRender(){
     const liveTotal=Number(liveList&&liveList.dataset&&liveList.dataset.sessionVirtualTotal||0);
     if(liveList&&liveTotal>SESSION_VIRTUAL_THRESHOLD_ROWS){
       const nextWindow=_sessionVirtualWindow({
+        offsets:liveList._sessionVirtualLayout&&liveList._sessionVirtualLayout.offsets,
         total:liveTotal,
         scrollTop:liveList.scrollTop||0,
         viewportHeight:liveList.clientHeight||520,
@@ -8111,7 +8191,9 @@ function _scheduleSessionVirtualizedRender(){
       });
       const currentStart=Number(liveList.dataset.sessionVirtualStart||0);
       const currentEnd=Number(liveList.dataset.sessionVirtualEnd||0);
-      if(nextWindow.virtualized&&nextWindow.start===currentStart&&nextWindow.end===currentEnd) return;
+      const layout=liveList._sessionVirtualLayout;
+      const layoutChanged=layout&&layout.key!==_sessionVirtualLayoutKey(liveList);
+      if(!layoutChanged&&nextWindow.virtualized&&nextWindow.start===currentStart&&nextWindow.end===currentEnd) return;
     }
     renderSessionListFromCache();
   });
@@ -8458,6 +8540,7 @@ function renderSessionListFromCache(){
   const committedSwipeDuration=_sessionPrefersReducedMotion()?0:SESSION_SWIPE_DURATION_MS;
   const committedSwipeReflowDelay=Math.max(0,committedSwipeDuration-SESSION_SWIPE_REFLOW_LEAD_MS);
   const listScrollTopBeforeRender=list.scrollTop||0;
+  const viewportAnchorBeforeRender=_sessionVirtualViewportAnchor(list);
   list.innerHTML='';
   // #4671: belt-and-suspenders. The authoritative skeleton-clear happens in
   // _applySessionListPayload (once fresh data is in hand) BEFORE this function is
@@ -8719,12 +8802,10 @@ function renderSessionListFromCache(){
   }
   if(curItems.length) groups.push({label:curLabel,items:curItems});
   const flatSessionRows=[];
-  let hasLineageSummary=false;
   for(const g of groups){
     if(_groupCollapsed[g.label]) continue;
     for(const s of g.items){
       flatSessionRows.push({group:g,session:s});
-      if(!hasLineageSummary&&_sessionRowHasLineageSummary(s)) hasLineageSummary=true;
     }
   }
   _sessionVisibleSidebarIds=flatSessionRows.map(row=>row.session&&row.session.session_id).filter(Boolean);
@@ -8740,13 +8821,18 @@ function renderSessionListFromCache(){
     }
   }
   _ensureSessionVirtualScrollHandler(list);
+  const previousVirtualLayout=list._sessionVirtualLayout;
+  const virtualLayout=_sessionVirtualLayout(list,flatSessionRows);
+  const resizedAnchorIndex=previousVirtualLayout!==virtualLayout&&viewportAnchorBeforeRender
+    ?flatSessionRows.findIndex(row=>row.session.session_id===viewportAnchorBeforeRender.id):-1;
+  const renderedVirtualRows=[],virtualSpacers=[];
   const activeIndex=flatSessionRows.findIndex(row=>_sessionLineageContainsSession(row.session,activeSidForSidebar));
   const shouldAnchorActive=activeSidForSidebar&&activeIndex>=0&&(
     list.dataset.sessionVirtualActiveAnchor!==activeSidForSidebar||
     list.dataset.sessionVirtualFilter!==q
   );
   const virtualWindowBeforeActiveAnchor=_sessionVirtualWindow({
-    variableHeight:hasLineageSummary,
+    offsets:virtualLayout.offsets,
     total:flatSessionRows.length,
     scrollTop:listScrollTopBeforeRender,
     viewportHeight:list.clientHeight||520,
@@ -8758,14 +8844,14 @@ function renderSessionListFromCache(){
   const activeWasAlreadyVisible=activeIndex>=virtualWindowBeforeActiveAnchor.start&&activeIndex<virtualWindowBeforeActiveAnchor.end;
   const shouldMoveSidebarToActive=shouldAnchorActive&&!activeWasAlreadyVisible;
   let virtualWindow=_sessionVirtualWindow({
-    variableHeight:hasLineageSummary,
+    offsets:virtualLayout.offsets,
     total:flatSessionRows.length,
     scrollTop:listScrollTopBeforeRender,
     viewportHeight:list.clientHeight||520,
     itemHeight:SESSION_VIRTUAL_ROW_HEIGHT,
     buffer:SESSION_VIRTUAL_BUFFER_ROWS,
     threshold:SESSION_VIRTUAL_THRESHOLD_ROWS,
-    activeIndex:shouldMoveSidebarToActive?activeIndex:-1,
+    activeIndex:shouldMoveSidebarToActive?activeIndex:resizedAnchorIndex,
   });
   let virtualAnchorScrollTop=null;
   if(shouldMoveSidebarToActive&&virtualWindow.virtualized){
@@ -8777,8 +8863,7 @@ function renderSessionListFromCache(){
     delete list.dataset.sessionVirtualActiveAnchor;
   }
   list.dataset.sessionVirtualTotal=String(flatSessionRows.length);
-  // The rendered window owns the scroll policy. Detailed lineage summaries
-  // add a wrapping line, so fixed-height spacers cannot represent these rows.
+  // Scroll callbacks consume the same measured offsets as the rendered spacers.
   list.dataset.sessionVirtualEnabled=String(virtualWindow.virtualized);
   list.dataset.sessionVirtualFilter=q;
   list.dataset.sessionVirtualStart=String(virtualWindow.start);
@@ -8812,22 +8897,33 @@ function renderSessionListFromCache(){
       renderSessionListFromCache();
     };
     wrapper.appendChild(hdr);
+    const groupStart=globalSessionRowIndex;
     let groupTopPad=0;
     let groupBottomPad=0;
     for(const s of g.items){
       if(isGroupCollapsed) continue;
       const rowIndex=globalSessionRowIndex++;
       const inWindow=!virtualWindow.virtualized||(rowIndex>=virtualWindow.start&&rowIndex<virtualWindow.end);
-      if(inWindow){ body.appendChild(_renderOneSession(s, Boolean(g.isPinned))); }
-      else if(rowIndex<virtualWindow.start){ groupTopPad+=virtualWindow.itemHeight; }
-      else { groupBottomPad+=virtualWindow.itemHeight; }
+      if(inWindow){
+        const el=_renderOneSession(s, Boolean(g.isPinned));
+        body.appendChild(el);renderedVirtualRows.push({el,index:rowIndex});
+      }else if(rowIndex<virtualWindow.start){ groupTopPad+=virtualLayout.offsets[rowIndex+1]-virtualLayout.offsets[rowIndex]; }
+      else { groupBottomPad+=virtualLayout.offsets[rowIndex+1]-virtualLayout.offsets[rowIndex]; }
     }
-    if(groupTopPad>0){ body.insertBefore(_sessionVirtualSpacer(groupTopPad,'before'), body.firstChild); }
-    if(groupBottomPad>0){ body.appendChild(_sessionVirtualSpacer(groupBottomPad,'after')); }
+    if(groupTopPad>0){
+      const el=_sessionVirtualSpacer(groupTopPad,'before');body.insertBefore(el,body.firstChild);
+      virtualSpacers.push({el,start:groupStart,end:Math.min(globalSessionRowIndex,virtualWindow.start)});
+    }
+    if(groupBottomPad>0){
+      const el=_sessionVirtualSpacer(groupBottomPad,'after');body.appendChild(el);
+      virtualSpacers.push({el,start:Math.max(groupStart,virtualWindow.end),end:globalSessionRowIndex});
+    }
     wrapper.appendChild(body);
     list.appendChild(wrapper);
   }
+  _measureSessionVirtualRows(list,virtualLayout,renderedVirtualRows,virtualSpacers);
   if(virtualAnchorScrollTop!==null){
+    virtualAnchorScrollTop=Math.max(0,virtualLayout.offsets[activeIndex]-list.clientHeight/2);
     list.scrollTop=virtualAnchorScrollTop;
   }else if(listScrollTopBeforeRender>0){
     // Always restore the user's scroll position after re-render, regardless
@@ -8837,6 +8933,10 @@ function renderSessionListFromCache(){
     // scrollTop drops to 0 — producing a "scroll keeps jumping back" feel
     // when the list scrolls naturally. Fixed for #1669 follow-up.
     list.scrollTop=listScrollTopBeforeRender;
+    if(viewportAnchorBeforeRender){
+      const anchor=renderedVirtualRows.find(r=>r.el.dataset.sid===viewportAnchorBeforeRender.id);
+      if(anchor) list.scrollTop+=anchor.el.getBoundingClientRect().top-list.getBoundingClientRect().top-viewportAnchorBeforeRender.y;
+    }
     _resyncSessionVirtualWindowAfterRender(list, listScrollTopBeforeRender, virtualWindow);
   }
   const archivePagingFilterActive=_sessionArchivePagingFilterActive();

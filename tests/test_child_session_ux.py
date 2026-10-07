@@ -61,6 +61,11 @@ def test_reference_only_chip_localized_static_archived_label(state):
         label, indicator = chip["children"]
         assert label["className"] == "session-child-count-label"
         assert label["textContent"] == row["archivedShort"]
+        child_words = {'en': 'child', 'it': 'Figlio', 'ja': '子', 'ru': 'потомок',
+                       'es': 'Hija', 'de': 'Kind', 'zh': '子', 'zh-Hant': '子',
+                       'pt': 'Filha', 'ko': '하위', 'fr': 'Enfant', 'cs': 'dítě',
+                       'tr': 'alt', 'pl': 'dziecko', 'vi': 'con'}
+        assert child_words[row['locale']] in label['textContent'], row['locale']
         assert "session-child-count-state" in indicator["className"].split()
         assert chip["title"].endswith(" · " + row["archived"])
         assert chip["attributes"]["role"] == "img" and "tabindex" not in chip["attributes"]

@@ -76,6 +76,25 @@ childless Detailed-density compressed rows with the production renderer/CSS at
 must exist locally; the gate reports an unavailable ref before launching Chromium.
 Childless rows assert master parity, not improved behavior beyond master.
 
+`./scripts/test.sh tests/test_lineage_summary_virtualization.py tests/test_issue500_session_list_virtualization.py`
+checks measured prefix-sum windows/spacers and the queued scroll scheduler.
+`python tests/browser_lineage_scroll_selection.py --output <artifact-directory>`
+exercises the real grouping/window/row renderer and scroll listener: stable top
+conversation and offset at unchanged scrollTop, bounded DOM, bottom reachability,
+reload/search-return active anchoring, localized narrow layouts, density/theme/
+width changes with pending RAF, and child/prior-turn keyboard/touch navigation.
+Use `--before-ref <commit>` for exact-head regression evidence.
+
+`python tests/browser_lineage_sidebar_repaint.py --output <artifact-directory>`
+records cold plus five refresh/layout samples for 500/2,000 rows, sparse and all
+lineage summaries, Detailed plain and Compact controls. It includes production
+child projection, grouping, window/row construction and forced layout, excluding
+fixture generation and synthetic unread/viewed-store setup. Measurement inside
+the renderer may force layout before the final layout read; compare `totalMs`,
+not just the final `layoutMs`. DOM row/node counts accompany each sample. This
+component gate excludes full-app/API/filtering/stream latency. Run sequentially
+without concurrent browser matrices, and use `--before-ref` for matched controls.
+
 ## Static JS runtime lint (brick-class regression guard)
 
 Some JS bugs throw a `TypeError`/`ReferenceError` only when a specific function
