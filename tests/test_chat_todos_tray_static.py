@@ -199,3 +199,28 @@ def test_chat_todos_desktop_does_not_push_message_stream():
     mobile_block_start = css.find("@media(max-width:768px)")
     mobile_block = css[mobile_block_start : mobile_block_start + 1200]
     assert ".chat-todos{position:static;" in mobile_block
+
+
+def test_rail_hide_helper_does_not_clobber_a_user_hidden_tab():
+    """Greptile P1 (2026-10-07T07:24:18Z): disabling the in-chat tray must not
+    force-show a Todos entry the user hid independently via hidden_tabs.
+
+    The helper used to `classList.toggle('nav-tab-hidden', !!enabled)`, which
+    REMOVED the class whenever the tray was off — resurrecting a tab the user
+    had deliberately hidden. Tray-off must defer to the canonical visibility
+    owner instead of asserting its own show/hide.
+    """
+    ui = _read_static("static/ui.js")
+    start = ui.find("function _syncChatTodosRailVisibility()")
+    end = ui.find("function _chatTodosToggleEnabled", start)
+    assert start != -1 and end != -1
+    helper = ui[start:end]
+
+    # Never unconditionally reveal the tab...
+    assert "classList.toggle('nav-tab-hidden',!!enabled)" not in helper
+    assert "classList.remove('nav-tab-hidden')" not in helper
+    # ...tray-off hands visibility back to the canonical owner (hidden_tabs)...
+    assert "_applyTabVisibility(_getHiddenTabs())" in helper
+    # ...and tray-on still suppresses the duplicate sidebar surface + bounces.
+    assert "classList.add('nav-tab-hidden')" in helper
+    assert "switchPanel('chat'" in helper

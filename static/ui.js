@@ -10469,9 +10469,18 @@ function _syncChatTodosRailVisibility(){
   // When the in-chat tray is active, hide the sidebar Todos panel so the
   // user never has two competing todo surfaces.
   const enabled=chatTodosEnabled();
+  if(enabled){
     document.querySelectorAll('[data-panel="todos"]').forEach(function(el){
-      el.classList.toggle('nav-tab-hidden',!!enabled);
+      el.classList.add('nav-tab-hidden');
     });
+  }else if(typeof _applyTabVisibility==='function'&&typeof _getHiddenTabs==='function'){
+    // Tray OFF: hand visibility back to its canonical owner. Unconditionally
+    // REMOVING nav-tab-hidden here also revealed a Todos entry the user had
+    // hidden independently through hidden_tabs, so an explicitly hidden tab
+    // reappeared immediately (or after reload). Deferring to
+    // _applyTabVisibility re-derives the tab's own preference instead.
+    _applyTabVisibility(_getHiddenTabs());
+  }
   // If the sidebar Todos panel is currently open, bounce back to chat.
   if(enabled){
     const panel=document.getElementById('panelTodos');
