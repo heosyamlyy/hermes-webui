@@ -8243,13 +8243,18 @@ function _resyncSessionVirtualWindowAfterRender(list, virtualWindow){
   const layout=list._sessionVirtualLayout,generation=layout.measurementGeneration;
   // Measurement can replace the initial estimates even at unchanged scrollTop.
   // Check viewport coverage, not overscan equality, after restoring the anchor.
-  const viewport=_sessionVirtualWindow({total:layout.rows.length,offsets:layout.contentOffsets,
-    scrollTop:list.scrollTop,viewportHeight:list.clientHeight||520,buffer:0});
-  if(viewport.start>=virtualWindow.start&&viewport.end<=virtualWindow.end) return;
+  const viewportCovered=()=>{
+    const viewport=_sessionVirtualWindow({total:layout.rows.length,offsets:layout.contentOffsets,
+      scrollTop:list.scrollTop,viewportHeight:list.clientHeight||520,buffer:0});
+    return viewport.start>=virtualWindow.start&&viewport.end<=virtualWindow.end;
+  };
+  // Keep the next-frame clamp check for nonzero restores: browsers can defer
+  // clamping until layout settles. A covered viewport still needs no repaint.
+  if(list.scrollTop<=0&&viewportCovered()) return;
   _sessionVirtualResyncRaf=requestAnimationFrame(()=>{
     _sessionVirtualResyncRaf=0;
     if(_renamingSid||_sessionListSkeletonActive||!list.isConnected||
-      list._sessionVirtualLayout!==layout||layout.measurementGeneration!==generation) return;
+      list._sessionVirtualLayout!==layout||layout.measurementGeneration!==generation||viewportCovered()) return;
     // One correction per measurement generation; its own measurement must not
     // enqueue another correction and form a stationary render loop.
     list._sessionVirtualSettleCorrecting=true;

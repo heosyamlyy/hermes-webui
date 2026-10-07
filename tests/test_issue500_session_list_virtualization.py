@@ -184,8 +184,11 @@ _sessionListSkeletonActive=false;
 _resyncSessionVirtualWindowAfterRender(list,oldWindow);
 // A subsequent fully covered render must cancel a queued stale correction.
 _resyncSessionVirtualWindowAfterRender(list,{virtualized:true,start:80,end:115});flush();
+_resyncSessionVirtualWindowAfterRender(list,{virtualized:true,start:80,end:115});
+// A browser can clamp the restored scroll position only on the next frame.
+list.scrollTop=0;flush();
 console.log(JSON.stringify({stationary,covered,clamped,replaced,superseded,skeleton,final:renderCount,pending:queue.size}));
 """
     metrics = json.loads(_run_node(source))
     assert metrics == dict(stationary=1, covered=1, clamped=2, replaced=2,
-                           superseded=2, skeleton=2, final=2, pending=0)
+                           superseded=2, skeleton=2, final=3, pending=0)
