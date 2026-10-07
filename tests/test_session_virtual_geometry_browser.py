@@ -27,6 +27,7 @@ def test_grouped_active_anchor_and_offscreen_preview_heights(tmp_path):
 @pytest.mark.parametrize(('script', 'case', 'count'), [
     ('browser_session_virtual_geometry.py', 'projects', 4),
     ('browser_archived_child_label.py', None, 900),
+    ('browser_session_virtual_settle.py', None, 22),
 ])
 def test_project_controls_and_reference_only_labels(tmp_path, script, case, count):
     pytest.importorskip('playwright.sync_api')

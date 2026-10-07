@@ -328,6 +328,12 @@ using the rendered row's position, including preceding controls and date headers
 Overscan membership is not viewport visibility: activation/filter transitions
 check the actual row rectangle, preserving an already visible target. Ordinary
 scroll refreshes do not recenter an unchanged active conversation.
+After measurement and anchor restoration, the measured content-coordinate
+window must cover the viewport without requiring another scroll event. An
+uncovered viewport queues one generation-guarded animation-frame correction;
+superseded measurements cannot repaint, and the correction cannot recursively
+enqueue itself. Settled layout, theme, locale and density transitions retain
+bounded row DOM and preserve the conversation anchor's offset.
 This presentation cache does not acknowledge notifications or mutate session metadata.
 
 ## Client-side unread persistence (sidebar layer)

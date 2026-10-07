@@ -8042,7 +8042,7 @@ function _sessionVirtualWindow(opts){
   const total=Math.max(0, Number(opts&&opts.total)||0);
   const threshold=Math.max(1, Number(opts&&opts.threshold)||SESSION_VIRTUAL_THRESHOLD_ROWS);
   const itemHeight=Math.max(1, Number(opts&&opts.itemHeight)||SESSION_VIRTUAL_ROW_HEIGHT);
-  const buffer=Math.max(0, Number(opts&&opts.buffer)||SESSION_VIRTUAL_BUFFER_ROWS);
+  const buffer=opts&&opts.buffer===0?0:Math.max(0, Number(opts&&opts.buffer)||SESSION_VIRTUAL_BUFFER_ROWS);
   const viewportHeight=Math.max(itemHeight, Number(opts&&opts.viewportHeight)||itemHeight*10);
   const visibleRows=Math.max(1, Math.ceil(viewportHeight/itemHeight));
   if(total<=threshold){
@@ -8137,6 +8137,7 @@ function _sessionVirtualViewportAnchor(list){
 }
 
 function _measureSessionVirtualRows(list, layout, rendered, spacers){
+  layout.measurementGeneration=(layout.measurementGeneration||0)+1;
   // Read all geometry before writing spacers, avoiding a layout per row.
   const heights=rendered.map(({el,index})=>({el,index,height:el.getBoundingClientRect().height+
     (parseFloat(getComputedStyle(el).marginBottom)||0)}));
@@ -8235,18 +8236,25 @@ function _markSessionListPointerUp(){
 }
 
 let _sessionVirtualResyncRaf = 0;
-function _resyncSessionVirtualWindowAfterRender(list, expectedScrollTop, virtualWindow){
-  if(!list||!virtualWindow||!virtualWindow.virtualized) return;
-  expectedScrollTop=Number(expectedScrollTop)||0;
-  if(expectedScrollTop<=0) return;
+function _resyncSessionVirtualWindowAfterRender(list, virtualWindow){
   if(_sessionVirtualResyncRaf) cancelAnimationFrame(_sessionVirtualResyncRaf);
+  _sessionVirtualResyncRaf=0;
+  if(!list||!virtualWindow||!virtualWindow.virtualized||list._sessionVirtualSettleCorrecting) return;
+  const layout=list._sessionVirtualLayout,generation=layout.measurementGeneration;
+  // Measurement can replace the initial estimates even at unchanged scrollTop.
+  // Check viewport coverage, not overscan equality, after restoring the anchor.
+  const viewport=_sessionVirtualWindow({total:layout.rows.length,offsets:layout.contentOffsets,
+    scrollTop:list.scrollTop,viewportHeight:list.clientHeight||520,buffer:0});
+  if(viewport.start>=virtualWindow.start&&viewport.end<=virtualWindow.end) return;
   _sessionVirtualResyncRaf=requestAnimationFrame(()=>{
     _sessionVirtualResyncRaf=0;
-    if(_renamingSid) return;
-    const actualScrollTop=Number(list.scrollTop)||0;
-    const tolerance=Math.max(2, Number(virtualWindow.itemHeight||SESSION_VIRTUAL_ROW_HEIGHT)/2);
-    if(Math.abs(actualScrollTop-expectedScrollTop)<=tolerance) return;
-    renderSessionListFromCache();
+    if(_renamingSid||_sessionListSkeletonActive||!list.isConnected||
+      list._sessionVirtualLayout!==layout||layout.measurementGeneration!==generation) return;
+    // One correction per measurement generation; its own measurement must not
+    // enqueue another correction and form a stationary render loop.
+    list._sessionVirtualSettleCorrecting=true;
+    try{renderSessionListFromCache();}
+    finally{list._sessionVirtualSettleCorrecting=false;}
   });
 }
 
@@ -8956,8 +8964,8 @@ function renderSessionListFromCache(){
       const anchor=renderedVirtualRows.find(r=>r.el.dataset.sid===viewportAnchorBeforeRender.id);
       if(anchor) list.scrollTop+=anchor.el.getBoundingClientRect().top-list.getBoundingClientRect().top-viewportAnchorBeforeRender.y;
     }
-    _resyncSessionVirtualWindowAfterRender(list, listScrollTopBeforeRender, virtualWindow);
   }
+  _resyncSessionVirtualWindowAfterRender(list, virtualWindow);
   const archivePagingFilterActive=_sessionArchivePagingFilterActive();
   if(_showArchived&&!archivePagingFilterActive){
     const activeArchivedTotal=_sessionSourceFilter==='cli'?_archivedCliCount:_archivedWebuiCount;
