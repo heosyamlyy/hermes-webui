@@ -294,14 +294,17 @@ ordering. Compression-lineage segments remain one logical conversation and are
 not delegated child sessions.
 
 Child-chip tooltips and accessible toggle labels lead with the aggregated state,
-followed by one separator and the localized child count/toggle hint. Approval
+qualified with a localized child-session subject, followed by one separator and
+the localized child count/toggle hint. Approval
 and clarification tint the chip with semantic error/warning colors, including
 when its parent is active. Expanded attention rows pair their inset accent with
-the same error/warning background tint as parent attention rows, including when
-selected. Running and unread retain a plain status mark; concurrent unread
+the same error/warning background tint as parent attention rows when idle.
+Hover and selection backgrounds take precedence while the attention accent and
+status mark remain visible. Running and unread retain a plain status mark; concurrent unread
 completion remains in the chip tooltip and accessible name when running or
 attention takes visual precedence. A reference-only chip uses a localized
-archived label and is not an expander.
+short archived label, keeps the full archived explanation in its tooltip and
+accessible name, and is not an expander.
 Fork and delegated row indicators are both 14px; delegated navigation targets
 are at least 44px tall on narrow layouts or coarse pointers, while fine-pointer
 desktop rows remain compact.

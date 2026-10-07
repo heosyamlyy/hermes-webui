@@ -22,9 +22,9 @@ const results=locales.map(locale=>{{
   const refs={json.dumps([parent, child])};
   const result=renderFixture(raw,refs,false,'parent');
   const chip=flatten(result.element).find(e=>(e.className||'').split(' ').includes('session-child-count'));
-  return {{locale,chip,state:t('session_attention_{state}_title'),
+  return {{locale,chip,state:t('session_child_attention',t('session_attention_{state}_title')),
     hint:t('session_child_toggle_hint',t('session_meta_children',1)),
-    archived:LOCALES[locale].session_child_archived,
+    archived:LOCALES[locale].session_child_archived,archivedShort:LOCALES[locale].session_child_archived_short,
     running:LOCALES[locale].session_child_running,unread:LOCALES[locale].session_child_unread}};
 }});
 console.log(JSON.stringify(results));
@@ -60,7 +60,7 @@ def test_reference_only_chip_localized_static_archived_label(state):
             assert chip["title"].startswith(row['running' if state == 'streaming' else 'unread'] + ' · '), row["locale"]
         label, indicator = chip["children"]
         assert label["className"] == "session-child-count-label"
-        assert label["textContent"] == row["archived"]
+        assert label["textContent"] == row["archivedShort"]
         assert "session-child-count-state" in indicator["className"].split()
         assert chip["title"].endswith(" · " + row["archived"])
         assert chip["attributes"]["role"] == "img" and "tabindex" not in chip["attributes"]

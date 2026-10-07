@@ -96,7 +96,7 @@ def main():
                                     reasons.append('blocking pill lacks semantic tint')
                                 if data['background'] != data[state + 'Tint'] or data['hoverBackground'] != data[state + 'Tint']:
                                     reasons.append('blocking pill background lacks semantic tint')
-                                lead = 'Waiting for permission decision' if state == 'approval' else 'Waiting for your answer'
+                                lead = 'Child session: ' + ('Waiting for permission decision' if state == 'approval' else 'Waiting for your answer')
                                 if not data['title'].startswith(lead + ' · ') or data['title'].count(' · ') != 1 or ' — ' in data['title']:
                                     reasons.append('tooltip does not lead with state and one separator')
                             if data['aria'] != data['title']:
@@ -175,7 +175,7 @@ def main():
                               const probe=document.createElement('span');probe.style.color=`var(--${state==='approval'?'error':state==='clarify'?'warning':'accent'})`;
                               document.body.appendChild(probe);const expectedColor=getComputedStyle(probe).color;probe.remove();
                               return {box,mark,pill,titleRow,title:chip.title,aria:chip.getAttribute('aria-label'),
-                                label:t('session_child_archived'),text:chip.textContent,dotColor:ds.color,expectedColor,
+                                label:t('session_child_archived'),shortLabel:t('session_child_archived_short'),text:chip.textContent,dotColor:ds.color,expectedColor,
                                 display:ds.display,visibility:ds.visibility,opacity:ds.opacity,
                                 role:chip.getAttribute('role'),tabindex:chip.getAttribute('tabindex'),
                                 ownDot:result.element.querySelector(':scope > .session-attention-indicator').className,
@@ -192,7 +192,7 @@ def main():
                                 reasons.append('status mark not fully visible at 10px')
                             if data['dotColor'] != data['expectedColor']:
                                 reasons.append('active parent neutralizes archived indicator color')
-                            if not data['title'].endswith(' · ' + data['label']) or data['text'] != data['label'] or data['aria'] not in (None, data['title']):
+                            if not data['title'].endswith(' · ' + data['label']) or data['text'] != data['shortLabel'] or data['aria'] not in (None, data['title']):
                                 reasons.append('localized label or full tooltip/aria lost')
                             if data['role'] != 'img' or data['tabindex'] is not None or data['children']:
                                 reasons.append('reference-only chip became navigable')

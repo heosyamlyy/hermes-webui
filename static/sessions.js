@@ -7656,7 +7656,7 @@ function _createChildSessionStateIndicator({isStreaming=false,hasUnread=false,at
   state.className='session-state-indicator '+className
     +(attention?attentionClass:(isStreaming?' is-streaming':(hasUnread?' is-unread':'')));
   state.setAttribute('aria-hidden','true');
-  state.title=attention?attention.title:(isStreaming?t('session_child_running'):(hasUnread?t('session_child_unread'):''));
+  state.title=attention?t('session_child_attention',attention.title):(isStreaming?t('session_child_running'):(hasUnread?t('session_child_unread'):''));
   return state;
 }
 
@@ -9023,12 +9023,12 @@ function renderSessionListFromCache(){
       const childCountEl=document.createElement('span');
       childCountEl.className='session-child-count'
         +(childAttention&&childAttention.kind==='approval'?' is-attention-approval':(childAttention&&childAttention.kind==='clarify'?' is-attention-clarify':''));
-      const childLabel=childCount>0?t('session_meta_children', childCount):t('session_child_archived');
+      const childLabel=childCount>0?t('session_meta_children', childCount):t('session_child_archived_short');
       const label=document.createElement('span');
       label.className='session-child-count-label';
       label.textContent=childLabel;
       childCountEl.appendChild(label);
-      const childBadgeTip=childCount>0?_sessionChildBadgeTooltip(childLabel):childLabel;
+      const childBadgeTip=childCount>0?_sessionChildBadgeTooltip(childLabel):t('session_child_archived');
       childCountEl.title=childBadgeTip;
       if(hasChildState){
         const state=_createChildSessionStateIndicator(childState,'session-child-count-state');
@@ -9039,6 +9039,9 @@ function renderSessionListFromCache(){
       }
       ['pointerdown','pointerup','click'].forEach(ev=>childCountEl.addEventListener(ev,e=>e.stopPropagation()));
       if(childCount>0){
+        // Touch focus can resize the row's action gutter before the synthetic
+        // click, moving this chip away from the finger. Keyboard focus is unchanged.
+        childCountEl.addEventListener('pointerdown',e=>{if(e.pointerType==='touch') e.preventDefault();});
         childCountEl.setAttribute('role','button');
         childCountEl.setAttribute('tabindex','0');
         childCountEl.setAttribute('aria-expanded',childrenExpanded?'true':'false');
@@ -9417,7 +9420,7 @@ function renderSessionListFromCache(){
         row.appendChild(label);
         const state=makeChildState();
         row.appendChild(state);
-        row.title=state.title?`Open child session — ${state.title}`:'Open child session';
+        row.title=state.title?`${t('session_child_open')} · ${state.title}`:t('session_child_open');
         row.onclick=async(e)=>{
           e.stopPropagation();
           await openChildSession(child);

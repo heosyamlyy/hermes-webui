@@ -60,10 +60,20 @@ search/disclosure transitions, reference-only state, and computed expanded-child
 attention background/accent colors across active light/dark skins and mobile.
 Use `--before-ref <commit>` to record exact previous-head failures.
 
+`python tests/browser_child_finishing_ux.py --output <artifact-directory>` checks
+archived-label glyph bounds at 300/360px (with graceful 180px clipping),
+child-qualified localized attention and delegated action labels in every locale,
+Detailed prior-turn readability, and idle/hover/leave/selection precedence for
+fork and delegated attention rows across the five affected active skins plus
+default, light/dark, desktop/tablet/phone. It saves before/after screenshots using
+`--before-ref <commit>`. The concurrent-state gate also exercises actual touch
+chip expansion at the minimum width: focus must not retarget its synthetic click.
+
 `python tests/browser_child_title_spacing.py --output <artifact-directory>`
 checks fork/worktree/project badge combinations at 180–240px and compares
 childless Detailed-density compressed rows with the production renderer/CSS at
-master `be35ba3e28eef5b59e32b4aad42a74e8e0671111` (that commit must exist locally).
+`origin/master`, or an explicit `--baseline-ref <master revision>`. The baseline
+must exist locally; the gate reports an unavailable ref before launching Chromium.
 Childless rows assert master parity, not improved behavior beyond master.
 
 ## Static JS runtime lint (brick-class regression guard)

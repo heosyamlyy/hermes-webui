@@ -124,7 +124,8 @@ def main():
                                             failures.append('search/disclosure expansion mismatch')
                                         for child in data['children']:
                                             if 'needs-attention' in child['className']:
-                                                if child['background'] != data['expectedBackground'] or data['expectedAccent'] not in child['shadow']:
+                                                expected_background = 'rgba(255, 255, 255, 0.06)' if 'active' in child['className'].split() else data['expectedBackground']
+                                                if child['background'] != expected_background or data['expectedAccent'] not in child['shadow']:
                                                     failures.append('child attention background/accent differs from parent tint')
                                         if not data['markVisible']:
                                             failures.append('chip mark fails hit test')

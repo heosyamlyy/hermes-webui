@@ -141,7 +141,7 @@ def test_reference_only_running_child_has_status_even_without_visible_descendant
                         _lineage_root_id="child", relationship_type="child_session")
     out = run_component([parent], [parent, reference], False, "other")
     label, state = out["chip"]["children"]
-    assert label["textContent"] == "Child sessions (archived)"
+    assert label["textContent"] == "Archived"
     assert label["className"] == "session-child-count-label"
     assert "is-streaming" in state["className"]
     assert out["chip"]["attributes"]["role"] == "img", "Reference-only status is not an empty expander"

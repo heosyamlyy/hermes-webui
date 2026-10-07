@@ -51,7 +51,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--before-ref')
+    parser.add_argument('--baseline-ref', default='origin/master', help='Available master revision for childless geometry parity')
     args = parser.parse_args()
+    baseline_ref = subprocess.run(['git', 'rev-parse', '--verify', f'{args.baseline_ref}^{{commit}}'], cwd=ROOT, text=True, capture_output=True)
+    if baseline_ref.returncode:
+        parser.error(f'Baseline {args.baseline_ref!r} is unavailable; fetch it or pass --baseline-ref <available master revision>')
+    args.baseline_ref = baseline_ref.stdout.strip()
     args.output.mkdir(parents=True, exist_ok=True)
 
     def source(path):
@@ -73,7 +78,7 @@ def main():
             page.add_script_tag(content=SCENE)
             baseline = context.new_page()
             baseline.set_content('<main id="fixture" style="padding:8px;box-sizing:border-box"></main>')
-            master = 'be35ba3e28eef5b59e32b4aad42a74e8e0671111'
+            master = args.baseline_ref
             baseline.add_style_tag(content=subprocess.check_output(['git', 'show', f'{master}:static/style.css'], cwd=ROOT, text=True))
             baseline.add_script_tag(content=component_script(subprocess.check_output(['git', 'show', f'{master}:static/sessions.js'], cwd=ROOT, text=True)))
             baseline.add_script_tag(content=source('static/i18n.js'))
@@ -93,7 +98,7 @@ def main():
                                     failures = []
                                     if children and not data['markVisible']:
                                         failures.append('badge-heavy child status clipped')
-                                    if children and data['titleWidth'] < 20:
+                                    if children and data['titleWidth'] < 24:
                                         failures.append('child title floor missing')
                                     if not children:
                                         master_data = baseline.evaluate('args=>scene(...args)', [children, badges, own, density])
@@ -106,7 +111,7 @@ def main():
             context.close()
         browser.close()
     failures = [r for r in results if r['failures']]
-    (args.output / 'report.json').write_text(json.dumps(dict(cases=len(results), failures=len(failures), errors=errors, results=results), indent=2))
+    (args.output / 'report.json').write_text(json.dumps(dict(baseline_ref=args.baseline_ref, cases=len(results), failures=len(failures), errors=errors, results=results), indent=2))
     print(json.dumps(dict(cases=len(results), failures=len(failures), errors=errors)))
     if (failures or errors) and not args.before_ref:
         raise SystemExit(1)
