@@ -7876,6 +7876,18 @@ function _toggleTabVisibilityChip(panel){
   // tab still hidden. Turn the tray off instead — it is what owns the hide —
   // so the click actually restores the sidebar Todos tab.
   if(_tabVisibilityChipForcedOff(panel)){
+    // The tray owns the hide — turn it off. But the user may ALSO have hidden
+    // this tab independently (hidden_tabs), and that bit survives the tray
+    // being disabled: the click then left the tab hidden and the chip still
+    // OFF, i.e. it took a second click to reveal a tab the user had just
+    // switched on (re-gate 2026-10-07, static/panels.js:7878). Drop the
+    // independent hide in the same explicit chip-enable branch.
+    var forced=_getHiddenTabs();
+    var forcedIdx=forced.indexOf(panel);
+    if(forcedIdx!==-1){
+      forced.splice(forcedIdx,1);
+      _setHiddenTabs(forced);
+    }
     if(typeof _chatTodosToggleEnabled==='function') _chatTodosToggleEnabled(false);
     _renderTabVisibilityChips();
     _scheduleAppearanceAutosave();

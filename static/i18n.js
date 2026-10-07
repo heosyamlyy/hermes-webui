@@ -27528,6 +27528,12 @@ function applyLocaleToDOM() {
     const val = t(key);
     if (val && val !== key) el.setAttribute('aria-label', val);
   });
+  // Dynamic text that also carries a data-i18n fallback key (e.g. the chat-todos
+  // summary #chatTodosSummary with data-i18n="tab_todos") is clobbered by the
+  // re-stamp above: opening Settings — or any locale change — reset the live
+  // "1 active · 1 total" summary to the static "Todos" label. Repaint the live
+  // values after the restamp (guarded: i18n.js loads standalone in some tests).
+  if (typeof renderChatTodos === 'function') renderChatTodos();
   if (typeof syncWorkspacePanelUI === 'function') syncWorkspacePanelUI();
   if (typeof syncAppTitlebar === 'function') syncAppTitlebar();
 }

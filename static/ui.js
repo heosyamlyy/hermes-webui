@@ -10502,6 +10502,10 @@ function _syncChatTodosExpanded(open){
 }
 function _chatTodosToggleEnabled(checked){
   _setChatTodosEnabled(checked);
+  // The tray force-hides the sidebar Todos entry, so its visibility chip must be
+  // repainted here: toggling the tray from Settings changed nothing on screen
+  // while the chip kept reporting ON (re-gate 2026-10-07, static/ui.js:10503).
+  if(typeof _renderTabVisibilityChips==='function') _renderTabVisibilityChips();
   // Keep the settings checkbox in sync for callers that toggle the tray from
   // elsewhere (e.g. the tab-visibility chip that owns the same hide).
   const prefCb=$('settingsChatTodosInChat');

@@ -504,3 +504,156 @@ def test_chat_todos_locales_keep_diacritics():
     vi_block = src[start : src.find("\n  },", start)]
     non_ascii = sum(1 for ch in vi_block if ord(ch) > 127)
     assert non_ascii > 200, f"vi locale looks diacritic-stripped ({non_ascii} non-ASCII chars)"
+
+
+# ── Re-gate 2026-10-07T14:33:07Z (head cfd6f65c) — the three remaining items ──
+# Each pins one finding, and where the maintainer reproduced it "in Chromium"
+# the probe runs the shipped function under node instead of asserting on text.
+
+
+def test_chat_todos_settings_toggle_repaints_the_visibility_chips():
+    # [SILENT] static/ui.js:10503 — "Enabling the tray through Settings hides
+    # Todos while its visibility chip still reports ON." The tray owns the hide,
+    # so the chip must be re-rendered whenever the tray preference changes.
+    ui = _read_static("static/ui.js")
+    start = ui.find("function _chatTodosToggleEnabled(checked){")
+    end = ui.find("// \u2500\u2500 Chat todos alignment", start)
+    assert start != -1 and end != -1, "missing _chatTodosToggleEnabled block"
+    handler = ui[start:end]
+    enable_at = handler.find("_setChatTodosEnabled(checked);")
+    repaint_at = handler.find("_renderTabVisibilityChips()")
+    assert enable_at != -1 and repaint_at != -1, "chips are never repainted on toggle"
+    assert enable_at < repaint_at, "repaint must follow the preference write"
+    assert "typeof _renderTabVisibilityChips==='function'" in handler
+
+
+def test_chat_todos_chip_enable_clears_an_independent_hidden_tabs_bit():
+    # [SILENT] static/panels.js:7878 — "With Todos independently hidden and the
+    # tray enabled, clicking the OFF visibility chip disables the tray but
+    # leaves Todos hidden." The explicit chip-enable branch must drop the
+    # independent hidden_tabs entry in the same click.
+    panels = _read_static("static/panels.js")
+    start = panels.find("function _toggleTabVisibilityChip(panel){")
+    end = panels.find("function _toggleDashboardVisibilityChip", start)
+    assert start != -1 and end != -1, "missing _toggleTabVisibilityChip block"
+    handler = panels[start:end]
+    forced_at = handler.find("if(_tabVisibilityChipForcedOff(panel)){")
+    tray_off_at = handler.find("_chatTodosToggleEnabled(false)", forced_at)
+    assert forced_at != -1 and tray_off_at != -1
+    branch = handler[forced_at:tray_off_at]
+    assert "_setHiddenTabs(" in branch, "forced-off branch never clears hidden_tabs"
+    assert "_getHiddenTabs()" in branch
+
+
+def test_apply_locale_repaints_the_chat_todos_summary():
+    # [SILENT] static/index.html:446 — "Opening Settings erases the task summary:
+    # applyLocaleToDOM() overwrites the dynamic summary through
+    # data-i18n=\"tab_todos\"." The live value must be repainted after restamping.
+    src = _read_static("static/i18n.js")
+    start = src.find("function applyLocaleToDOM() {")
+    end = src.find("// Apply saved locale immediately", start)
+    assert start != -1 and end != -1, "missing applyLocaleToDOM"
+    body = src[start:end]
+    aria_at = body.find("[data-i18n-aria-label]")
+    repaint_at = body.find("typeof renderChatTodos === 'function'")
+    sync_at = body.find("syncWorkspacePanelUI()")
+    assert repaint_at != -1, "applyLocaleToDOM never repaints the todos summary"
+    assert aria_at < repaint_at < sync_at, "repaint must follow the locale restamp"
+
+
+_TOGGLE_CHIPS_PROBE = """
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+let chipsRendered = 0;
+let enabledSet = null;
+let expandedCalls = [];
+let renderCalls = 0;
+function _setChatTodosEnabled(v) { enabledSet = !!v; }
+function _syncChatTodosExpanded(v) { expandedCalls.push(!!v); }
+function renderChatTodos() { renderCalls++; }
+function _scheduleAppearanceAutosave() {}
+function $() { return null; }
+var _renderTabVisibilityChips = function () { chipsRendered++; };
+__HELPER__
+_chatTodosToggleEnabled(true);
+assert(enabledSet === true, 'tray preference must be written');
+assert(chipsRendered === 1, 'enabling the tray must repaint the visibility chips');
+assert(expandedCalls.length === 1 && expandedCalls[0] === false, 're-enable restarts collapsed');
+assert(renderCalls === 1, 'tray contents are repainted');
+_chatTodosToggleEnabled(false);
+assert(enabledSet === false, 'disabling writes through');
+assert(chipsRendered === 2, 'disabling must repaint the chips too');
+console.log('ok');
+"""
+
+
+def test_chat_todos_toggle_repaints_chips_probe(tmp_path):
+    ui = _read_static("static/ui.js")
+    helper = _extract(
+        ui, "function _chatTodosToggleEnabled(checked){", "// \u2500\u2500 Chat todos alignment"
+    )
+    script = _TOGGLE_CHIPS_PROBE.replace("__HELPER__", helper)
+    assert _run_node(tmp_path, "toggle_chips_probe.js", script).strip() == "ok"
+
+
+_CHIP_FORCED_OFF_PROBE = """
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+const _ALWAYS_VISIBLE_TABS = new Set(['chat', 'settings']);
+let hidden = ['todos', 'notes'];
+let applied = null;
+let trayToggles = [];
+let chips = 0;
+let chatTodosOn = true;
+function _getHiddenTabs() { return hidden.slice(); }
+function _setHiddenTabs(v) { hidden = v.slice(); }
+function _applyTabVisibility(h) { applied = h.slice(); }
+function _renderTabVisibilityChips() { chips++; }
+function _scheduleAppearanceAutosave() {}
+function chatTodosEnabled() { return chatTodosOn; }
+function _chatTodosToggleEnabled(v) { chatTodosOn = !!v; trayToggles.push(!!v); }
+__HELPER__
+_toggleTabVisibilityChip('todos');
+assert(hidden.indexOf('todos') === -1, 'chip-enable must clear the independent hidden_tabs bit');
+assert(hidden.indexOf('notes') !== -1, 'other hidden tabs must be untouched');
+assert(trayToggles.length === 1 && trayToggles[0] === false, 'the tray is what gets disabled');
+assert(chatTodosOn === false, 'tray preference is off');
+assert(chips === 1, 'the chip row is re-rendered');
+console.log('ok');
+"""
+
+
+def test_chat_todos_chip_enable_clears_hidden_tabs_probe(tmp_path):
+    panels = _read_static("static/panels.js")
+    helper = _extract(
+        panels, "function _toggleTabVisibilityChip(panel){", "function _toggleDashboardVisibilityChip"
+    )
+    forced_off = _extract(
+        panels, "function _tabVisibilityChipForcedOff(panel){", "function _renderTabVisibilityChips(){"
+    )
+    script = _CHIP_FORCED_OFF_PROBE.replace("__HELPER__", helper + "\n" + forced_off)
+    assert _run_node(tmp_path, "chip_forced_off_probe.js", script).strip() == "ok"
+
+
+_LOCALE_SUMMARY_PROBE = """
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+let repainted = 0;
+let workspaceSynced = 0;
+function renderChatTodos() { repainted++; }
+function syncWorkspacePanelUI() { workspaceSynced++; }
+function syncAppTitlebar() {}
+function t(k) { return k; }
+const document = { querySelectorAll() { return []; } };
+__HELPER__
+applyLocaleToDOM();
+assert(repainted === 1, 'applyLocaleToDOM must repaint the chat-todos summary');
+assert(workspaceSynced === 1, 'the other post-restamp syncs still run');
+console.log('ok');
+"""
+
+
+def test_apply_locale_repaint_probe(tmp_path):
+    src = _read_static("static/i18n.js")
+    helper = _extract(
+        src, "function applyLocaleToDOM() {", "// Apply saved locale immediately"
+    )
+    script = _LOCALE_SUMMARY_PROBE.replace("__HELPER__", helper)
+    assert _run_node(tmp_path, "locale_summary_probe.js", script).strip() == "ok"
