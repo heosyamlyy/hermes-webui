@@ -8905,8 +8905,8 @@ function renderSessionListFromCache(){
       const rowIndex=globalSessionRowIndex++;
       const inWindow=!virtualWindow.virtualized||(rowIndex>=virtualWindow.start&&rowIndex<virtualWindow.end);
       if(inWindow){
-        const el=_renderOneSession(s, Boolean(g.isPinned));
-        body.appendChild(el);renderedVirtualRows.push({el,index:rowIndex});
+        const el=body.appendChild(_renderOneSession(s, Boolean(g.isPinned)));
+        renderedVirtualRows.push({el,index:rowIndex});
       }else if(rowIndex<virtualWindow.start){ groupTopPad+=virtualLayout.offsets[rowIndex+1]-virtualLayout.offsets[rowIndex]; }
       else { groupBottomPad+=virtualLayout.offsets[rowIndex+1]-virtualLayout.offsets[rowIndex]; }
     }
