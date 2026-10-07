@@ -40,15 +40,20 @@ function measure(){
   document.body.appendChild(tint);const ts=getComputedStyle(tint), expectedBackground=ts.backgroundColor;
   const token=document.createElement('span');token.style.color=`var(--${state==='approval'?'error':'warning'})`;
   document.body.appendChild(token);const expectedAccent=getComputedStyle(token).color;token.remove();tint.remove();
+  // A neutral selected child is the selection reference, not a fixed paint
+  // string: attention must not override selection in either theme.
+  const selection=document.createElement('button');selection.className='session-child-session active';
+  root.appendChild(selection);const expectedSelection=getComputedStyle(selection).backgroundColor;selection.remove();
   const mark=chip.querySelector('.session-child-count-state'), r=mark.getBoundingClientRect();
   const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
   return {activity:root.querySelectorAll('.session-child-activity-indicator').length,
     activityStates:[...root.querySelectorAll('.session-child-activity-indicator')].map(pseudo),
     chip:pseudo(mark),markClass:mark.className,aria:chip.getAttribute('aria-label'),expanded:chip.getAttribute('aria-expanded'),
     markVisible:!!hit&&(hit===mark||mark.contains(hit)),own:pseudo(root.querySelector(':scope > .session-attention-indicator')),
-    expectedBackground,expectedAccent,
+    expectedBackground,expectedSelection,expectedAccent,
     children:[...root.querySelectorAll('.session-child-session')].map(e=>({className:e.className,
       background:getComputedStyle(e).backgroundColor,shadow:getComputedStyle(e).boxShadow,
+      color:getComputedStyle(e.querySelector('.session-child-session-state')).color,
       state:pseudo(e.querySelector('.session-child-session-state'))}))};
 }
 """
@@ -124,9 +129,14 @@ def main():
                                             failures.append('search/disclosure expansion mismatch')
                                         for child in data['children']:
                                             if 'needs-attention' in child['className']:
-                                                expected_background = 'rgba(255, 255, 255, 0.06)' if 'active' in child['className'].split() else data['expectedBackground']
-                                                if child['background'] != expected_background or data['expectedAccent'] not in child['shadow']:
-                                                    failures.append('child attention background/accent differs from parent tint')
+                                                active = 'active' in child['className'].split()
+                                                expected_background = data['expectedSelection'] if active else data['expectedBackground']
+                                                if child['background'] != expected_background:
+                                                    failures.append('child attention must use selection wash when active, parent tint when idle')
+                                                if active and child['background'] == data['expectedBackground']:
+                                                    failures.append('child selection indistinguishable from idle attention tint')
+                                                if data['expectedAccent'] not in child['shadow'] or child['color'] != data['expectedAccent']:
+                                                    failures.append('child semantic attention bar/mark lost')
                                         if not data['markVisible']:
                                             failures.append('chip mark fails hit test')
                                         results.append(dict(width=width, skin=skin, dark=dark, state=state, reference=reference, selected=selected, own=own, stage=stage, data=data, failures=failures))
