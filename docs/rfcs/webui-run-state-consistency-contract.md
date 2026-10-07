@@ -318,8 +318,11 @@ typography, theme or locale changes. Search query/title and content-preview text
 or visibility changes also invalidate a row's measurement, including offscreen
 rows. Selection changes, including selection through a lineage member, invalidate
 that row's retained height; selected heights do not seed unselected-row estimates.
-Scroll callbacks, including pending animation frames, consume that same
-current layout. Repainting preserves the visible conversation and its offset;
+Window selection and scroll callbacks, including pending animation frames,
+use content-coordinate offsets that include measured project/profile/archive
+controls and date headers. Group spacers use row-only prefix sums, so controls
+and headers are never counted twice. Both consume the same current
+layout. Repainting preserves the visible conversation and its offset;
 reload and leaving search can bring an off-window active conversation into view
 using the rendered row's position, including preceding controls and date headers.
 Overscan membership is not viewport visibility: activation/filter transitions

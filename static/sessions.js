@@ -8124,6 +8124,7 @@ function _sessionVirtualOffsets(layout){
     const measured=layout.measured.get(row.id);
     layout.offsets.push(layout.offsets.at(-1)+(measured?measured.height:layout.estimates[row.summary]));
   }
+  layout.contentOffsets=layout.offsets.map((offset,i)=>offset+(layout.chromeOffsets?.[i]||0));
 }
 
 function _sessionVirtualViewportAnchor(list){
@@ -8185,7 +8186,7 @@ function _scheduleSessionVirtualizedRender(){
     const liveTotal=Number(liveList&&liveList.dataset&&liveList.dataset.sessionVirtualTotal||0);
     if(liveList&&liveTotal>SESSION_VIRTUAL_THRESHOLD_ROWS){
       const nextWindow=_sessionVirtualWindow({
-        offsets:liveList._sessionVirtualLayout&&liveList._sessionVirtualLayout.offsets,
+        offsets:liveList._sessionVirtualLayout&&liveList._sessionVirtualLayout.contentOffsets,
         total:liveTotal,
         scrollTop:liveList.scrollTop||0,
         viewportHeight:liveList.clientHeight||520,
@@ -8826,48 +8827,10 @@ function renderSessionListFromCache(){
     }
   }
   _ensureSessionVirtualScrollHandler(list);
-  const previousVirtualLayout=list._sessionVirtualLayout;
-  const virtualLayout=_sessionVirtualLayout(list,flatSessionRows,searchQueryRaw,activeSidForSidebar);
-  const resizedAnchorIndex=previousVirtualLayout!==virtualLayout&&viewportAnchorBeforeRender
-    ?flatSessionRows.findIndex(row=>row.session.session_id===viewportAnchorBeforeRender.id):-1;
-  const renderedVirtualRows=[],virtualSpacers=[];
-  const activeIndex=flatSessionRows.findIndex(row=>_sessionLineageContainsSession(row.session,activeSidForSidebar));
-  const shouldAnchorActive=activeSidForSidebar&&activeIndex>=0&&(
-    list.dataset.sessionVirtualActiveAnchor!==activeSidForSidebar||
-    list.dataset.sessionVirtualFilter!==q
-  );
-  // Render-window membership includes overscan, not viewport visibility. On an
-  // activation/filter transition render the target, then inspect its real rect.
-  const shouldMoveSidebarToActive=shouldAnchorActive;
-  let virtualWindow=_sessionVirtualWindow({
-    offsets:virtualLayout.offsets,
-    total:flatSessionRows.length,
-    scrollTop:listScrollTopBeforeRender,
-    viewportHeight:list.clientHeight||520,
-    itemHeight:SESSION_VIRTUAL_ROW_HEIGHT,
-    buffer:SESSION_VIRTUAL_BUFFER_ROWS,
-    threshold:SESSION_VIRTUAL_THRESHOLD_ROWS,
-    activeIndex:shouldMoveSidebarToActive?activeIndex:resizedAnchorIndex,
-  });
-  let virtualAnchorScrollTop=null;
-  if(shouldMoveSidebarToActive&&virtualWindow.virtualized){
-    list.dataset.sessionVirtualActiveAnchor=activeSidForSidebar;
-    virtualAnchorScrollTop=virtualWindow.topPad;
-  }else if(activeSidForSidebar){
-    list.dataset.sessionVirtualActiveAnchor=activeSidForSidebar;
-  }else{
-    delete list.dataset.sessionVirtualActiveAnchor;
-  }
-  list.dataset.sessionVirtualTotal=String(flatSessionRows.length);
-  // Scroll callbacks consume the same measured offsets as the rendered spacers.
-  list.dataset.sessionVirtualEnabled=String(virtualWindow.virtualized);
-  list.dataset.sessionVirtualFilter=q;
-  list.dataset.sessionVirtualStart=String(virtualWindow.start);
-  list.dataset.sessionVirtualEnd=String(virtualWindow.end);
   // Render groups with collapsible headers. Large sidebars render only the
   // current session-row window plus top/bottom spacers inside each group body;
   // headers remain real DOM so pin/archive/date grouping and clicks survive.
-  let globalSessionRowIndex=0;
+  const virtualGroups=[];
   for(const g of groups){
     const wrapper=document.createElement('div');
     wrapper.className='session-date-group';
@@ -8893,6 +8856,61 @@ function renderSessionListFromCache(){
       renderSessionListFromCache();
     };
     wrapper.appendChild(hdr);
+    wrapper.appendChild(body);
+    list.appendChild(wrapper);
+    virtualGroups.push({g,body,isGroupCollapsed});
+  }
+  const previousVirtualLayout=list._sessionVirtualLayout;
+  const virtualLayout=_sessionVirtualLayout(list,flatSessionRows,searchQueryRaw,activeSidForSidebar);
+  // Empty group bodies expose cumulative controls/header geometry independently
+  // of row estimates. Spacers remain row-only; windows use content coordinates.
+  const contentTop=list.getBoundingClientRect().top+list.clientTop-list.scrollTop;
+  virtualLayout.chromeOffsets=[];
+  for(const {g,body,isGroupCollapsed} of virtualGroups){
+    if(isGroupCollapsed) continue;
+    const chrome=body.getBoundingClientRect().top-contentTop;
+    for(const s of g.items) virtualLayout.chromeOffsets.push(chrome);
+  }
+  virtualLayout.chromeOffsets.push(virtualLayout.chromeOffsets.at(-1)||0);
+  _sessionVirtualOffsets(virtualLayout);
+  const resizedAnchorIndex=previousVirtualLayout!==virtualLayout&&viewportAnchorBeforeRender
+    ?flatSessionRows.findIndex(row=>row.session.session_id===viewportAnchorBeforeRender.id):-1;
+  const renderedVirtualRows=[],virtualSpacers=[];
+  const activeIndex=flatSessionRows.findIndex(row=>_sessionLineageContainsSession(row.session,activeSidForSidebar));
+  const shouldAnchorActive=activeSidForSidebar&&activeIndex>=0&&(
+    list.dataset.sessionVirtualActiveAnchor!==activeSidForSidebar||
+    list.dataset.sessionVirtualFilter!==q
+  );
+  // Render-window membership includes overscan, not viewport visibility. On an
+  // activation/filter transition render the target, then inspect its real rect.
+  const shouldMoveSidebarToActive=shouldAnchorActive;
+  let virtualWindow=_sessionVirtualWindow({
+    offsets:virtualLayout.contentOffsets,
+    total:flatSessionRows.length,
+    scrollTop:listScrollTopBeforeRender,
+    viewportHeight:list.clientHeight||520,
+    itemHeight:SESSION_VIRTUAL_ROW_HEIGHT,
+    buffer:SESSION_VIRTUAL_BUFFER_ROWS,
+    threshold:SESSION_VIRTUAL_THRESHOLD_ROWS,
+    activeIndex:shouldMoveSidebarToActive?activeIndex:resizedAnchorIndex,
+  });
+  let virtualAnchorScrollTop=null;
+  if(shouldMoveSidebarToActive&&virtualWindow.virtualized){
+    list.dataset.sessionVirtualActiveAnchor=activeSidForSidebar;
+    virtualAnchorScrollTop=virtualWindow.topPad;
+  }else if(activeSidForSidebar){
+    list.dataset.sessionVirtualActiveAnchor=activeSidForSidebar;
+  }else{
+    delete list.dataset.sessionVirtualActiveAnchor;
+  }
+  list.dataset.sessionVirtualTotal=String(flatSessionRows.length);
+  // Scroll callbacks consume content offsets derived from these row measurements.
+  list.dataset.sessionVirtualEnabled=String(virtualWindow.virtualized);
+  list.dataset.sessionVirtualFilter=q;
+  list.dataset.sessionVirtualStart=String(virtualWindow.start);
+  list.dataset.sessionVirtualEnd=String(virtualWindow.end);
+  let globalSessionRowIndex=0;
+  for(const {g,body,isGroupCollapsed} of virtualGroups){
     const groupStart=globalSessionRowIndex;
     let groupTopPad=0;
     let groupBottomPad=0;
@@ -8914,8 +8932,6 @@ function renderSessionListFromCache(){
       const el=_sessionVirtualSpacer(groupBottomPad,'after');body.appendChild(el);
       virtualSpacers.push({el,start:Math.max(groupStart,virtualWindow.end),end:globalSessionRowIndex});
     }
-    wrapper.appendChild(body);
-    list.appendChild(wrapper);
   }
   _measureSessionVirtualRows(list,virtualLayout,renderedVirtualRows,virtualSpacers);
   if(virtualAnchorScrollTop!==null){

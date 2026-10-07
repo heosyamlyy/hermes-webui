@@ -22,3 +22,20 @@ def test_grouped_active_anchor_and_offscreen_preview_heights(tmp_path):
     assert sum(scene['scene'] == 'selection' for scene in report['results']) == 4
     assert not report['errors']
     assert all(not scene['failures'] for scene in report['results'])
+
+
+@pytest.mark.parametrize(('script', 'case', 'count'), [
+    ('browser_session_virtual_geometry.py', 'projects', 4),
+    ('browser_archived_child_label.py', None, 900),
+])
+def test_project_controls_and_reference_only_labels(tmp_path, script, case, count):
+    pytest.importorskip('playwright.sync_api')
+    command = [sys.executable, str(ROOT / 'tests' / script), '--output', str(tmp_path / 'report')]
+    if case:
+        command += ['--case', case]
+    result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=90)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads((tmp_path / 'report/report.json').read_text())
+    assert len(report['results']) == count
+    assert not report['errors']
+    assert all(not scene['failures'] for scene in report['results'])

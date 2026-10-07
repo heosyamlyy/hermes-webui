@@ -85,6 +85,18 @@ reload/search-return active anchoring, localized narrow layouts, density/theme/
 width changes with pending RAF, and child/prior-turn keyboard/touch navigation.
 Use `--before-ref <commit>` for exact-head regression evidence.
 
+`python tests/browser_archived_child_label.py --output <artifact-directory>`
+checks reference-only label glyph fit at 300/360px and mark/title geometry at
+180px across all locales, both densities, parent-own states and desktop/touch
+contexts using production CSS. `--before-ref` records the exact-head regression.
+
+`python tests/browser_session_virtual_geometry.py --case projects --output <artifact-directory>`
+checks 200 Compact rows below 20 production project controls, preserving visible
+rows at scrollTop 596 with six or 40 headers. It also checks bottom reachability,
+normal/search project selection, empty/collapsed headers and pending layout RAFs.
+The default cases cover grouped active anchoring and offscreen preview/selection
+height invalidation. API/filter projection is seeded; rendering/CSS are real.
+
 `python tests/browser_lineage_sidebar_repaint.py --output <artifact-directory>`
 records cold plus five refresh/layout samples for 500/2,000 rows, sparse and all
 lineage summaries, Detailed plain and Compact controls. It includes production
@@ -94,6 +106,7 @@ the renderer may force layout before the final layout read; compare `totalMs`,
 not just the final `layoutMs`. DOM row/node counts accompany each sample. This
 component gate excludes full-app/API/filtering/stream latency. Run sequentially
 without concurrent browser matrices, and use `--before-ref` for matched controls.
+Add `--projects` to include 20 production project controls and six date headers.
 
 ## Static JS runtime lint (brick-class regression guard)
 

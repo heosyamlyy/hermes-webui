@@ -22,12 +22,31 @@ def geometry_script(source):
     preview = re.search(r'^function _sessionSearchContentPreview\(.*?^\}', source, re.M | re.S).group()
     component = component.replace("function _sessionSearchContentPreview(){return '';}", preview)
     # Include the actual profile/archive controls preceding the date groups.
-    start = source.index('  // Profile filter toggle (show sessions from other profiles).')
+    start = source.index('  // Project filter bar — show when there are real projects')
     end = source.index('  // Empty state for active project filter', start)
     component = component.replace(' list.replaceChildren();', ' list.replaceChildren();\n' + source[start:end])
     return component + """
-const _otherProfileCount=3,archivedCount=12;
+const _otherProfileCount=3,archivedCount=12,profileFiltered=[];
+let _activeProject=null;
+const NO_PROJECT_FILTER='unassigned',projectIdFor=s=>s.project_id;
+function _sidebarHasUnprojectedRows(){return false;}
+let projectGroups=[];
+function _setActiveProjectFilter(id){
+ _activeProject=id;
+ groups=projectGroups.map(g=>({...g,items:g.items.filter(s=>!id||s.project_id===id)}));
+ repaint();
+}
+function projectScene(count=20,headerCount=6){
+ _allProjects.splice(0,_allProjects.length,...Array.from({length:count},(_,i)=>({project_id:'project'+i,name:'Project '+i+' authentication',color:'#abc'})));
+ activeSidForSidebar='other';window._sidebarDensity='compact';searchQueryRaw='';
+ const rows=Array.from({length:200},(_,i)=>({session_id:'p'+i,title:'Conversation '+i,message_count:3,project_id:'project'+i%count}));
+ fixtureSessions=rows;
+ groups=Array.from({length:headerCount},(_,i)=>({label:'Date '+i,items:rows.slice(Math.floor(i*200/headerCount),Math.floor((i+1)*200/headerCount))}));
+ projectGroups=groups;
+ $('sessionList').scrollTop=0;repaint();
+}
 function groupScene(){
+ _allProjects.length=0;
  scene('detailed','plain');
  const rows=groups[0].items;
  groups=['★ Pinned','Today','Yesterday','This week','Last week','Older'].map((label,i)=>({
@@ -48,7 +67,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--before-ref')
-    parser.add_argument('--case', choices=['anchor', 'selection', 'previews', 'all'], default='all')
+    parser.add_argument('--case', choices=['anchor', 'selection', 'previews', 'projects', 'all'], default='all')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
@@ -162,6 +181,63 @@ def main():
                         failures.append('preview transition moves top conversation/offset')
                     assert (state['previewCount'] > 0) == (transition == 'show')
                     results.append(dict(scene='previews-' + transition, width=width, before=before, after=after, state=state, failures=failures))
+            if args.case == 'projects':
+                page.evaluate('$("sessionList").style.height="520px"')
+                for headers in [6, 40]:
+                    page.evaluate('(n)=>projectScene(20,n)', headers)
+                    assert page.locator('.project-chip').count() == 21
+                    page.evaluate('_sessionVirtualScrollList.removeEventListener("scroll",_scheduleSessionVirtualizedRender);$("sessionList").scrollTop=596')
+                    page.wait_for_timeout(50)
+                    before = page.evaluate('visible()')
+                    controls = page.locator('.project-bar').bounding_box()
+                    page.screenshot(path=str(args.output / f'{width}-{headers}-projects-before.png'))
+                    page.evaluate('_sessionVirtualScrollList.addEventListener("scroll",_scheduleSessionVirtualizedRender,{passive:true});_scheduleSessionVirtualizedRender()')
+                    page.wait_for_timeout(100)
+                    after = page.evaluate('visible()')
+                    page.screenshot(path=str(args.output / f'{width}-{headers}-projects-after.png'))
+                    failures = []
+                    if (any(row not in after['rows'] for row in before['rows'])
+                            or before['scrollTop'] != after['scrollTop']):
+                        failures.append('grouped Compact scroll omits visible rows or changes offset')
+                    if not after['rows'] or after['rows'][0]['y'] > before['rows'][0]['y'] + 1:
+                        failures.append('blank band above first conversation')
+                    if page.locator('.session-date-body>.session-item').count() >= 80:
+                        failures.append('unbounded DOM')
+                    page.evaluate('$("sessionList").scrollTop=$("sessionList").scrollHeight')
+                    page.wait_for_timeout(100)
+                    bottom = page.evaluate('visible()')
+                    if not any(r['id'] == 'p199' for r in bottom['rows']):
+                        failures.append('last conversation unreachable')
+                    # Seeded filtering supplies rows; the production project control,
+                    # headers/window/measurement and queued scheduler remain real.
+                    stress = []
+                    for search in ([] if args.before_ref else [False, True]):
+                        page.evaluate('(s)=>{searchQueryRaw=s?"Conversation":"";$("sessionSearch").value=searchQueryRaw;}', search)
+                        page.locator('.project-chip').nth(1).evaluate('(e)=>e.onclick({})')
+                        page.wait_for_timeout(260)
+                        assert page.locator('.session-date-body>.session-item').count() == 10
+                        page.locator('.project-chip').first.evaluate('(e)=>e.onclick({})')
+                        page.wait_for_timeout(100)
+                        # Include a real empty header and collapsed body before rows.
+                        page.evaluate('groups.unshift({label:"Empty",items:[]});_groupCollapsed[groups[1].label]=true;'
+                                      '$("sessionList").scrollTop=1200;_scheduleSessionVirtualizedRender();'
+                                      'window._sidebarDensity="detailed";$("sessionList").style.width="240px";')
+                        page.wait_for_timeout(100)
+                        state = page.evaluate('''() => {
+                            const l=$('sessionList'),layout=l._sessionVirtualLayout,top=l.getBoundingClientRect().top;
+                            return {key:layout.key,rows:l.querySelectorAll('.session-date-body>.session-item').length,
+                              errors:[...l.querySelectorAll('.session-date-body>.session-item')].map(el=>{
+                                const i=layout.rows.findIndex(row=>row.id===el.dataset.sid);
+                                return Math.abs(el.getBoundingClientRect().top-top+l.scrollTop-layout.contentOffsets[i]);
+                              })};
+                        }''')
+                        if state['rows'] >= 80 or max(state['errors'], default=0) > 1:
+                            failures.append('pending layout/collapsed/empty header content geometry incorrect')
+                        stress.append(dict(search=search, state=state))
+                        page.evaluate('_groupCollapsed[groups[1].label]=false;searchQueryRaw="";$("sessionSearch").value="";'
+                                      'window._sidebarDensity="compact";$("sessionList").style.width="'+str(180 if touch else 300)+'px";')
+                    results.append(dict(scene='projects', width=width, headers=headers, controls=controls,
+                                        before=before, after=after, bottom=bottom, stress=stress, failures=failures))
             context.close()
         browser.close()
     (args.output / 'report.json').write_text(json.dumps(dict(results=results, errors=errors), indent=2))

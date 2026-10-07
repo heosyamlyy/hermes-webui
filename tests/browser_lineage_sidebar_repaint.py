@@ -15,6 +15,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tests.browser_lineage_scroll_selection import ROOT, script  # noqa: E402
+from tests.browser_session_virtual_geometry import geometry_script  # noqa: E402
 
 FIXTURE = r"""
 function prepare(count, kind){
@@ -54,6 +55,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--before-ref')
+    parser.add_argument('--projects', action='store_true', help='Include 20 production project controls and six date headers')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
@@ -68,9 +70,16 @@ def main():
         page = browser.new_page(viewport={'width': 1280, 'height': 800})
         page.set_content('<div id="sessionList" style="width:300px;height:520px;overflow:auto"></div>')
         page.add_style_tag(content=source('static/style.css'))
-        page.add_script_tag(content=script(source('static/sessions.js')))
+        page.add_script_tag(content=(geometry_script if args.projects else script)(source('static/sessions.js')))
         page.add_script_tag(content=source('static/i18n.js'))
-        page.add_script_tag(content=FIXTURE)
+        fixture = FIXTURE
+        if args.projects:
+            fixture = fixture.replace(" groups=[{label:'Today',items:_attachChildSessionsToSidebarRows(parents,fixtureSessions,fixtureSessions)}];",
+                                      " const rows=_attachChildSessionsToSidebarRows(parents,fixtureSessions,fixtureSessions);"
+                                      "groups=Array.from({length:6},(_,i)=>({label:'Date '+i,items:rows.slice(Math.floor(i*rows.length/6),Math.floor((i+1)*rows.length/6))}));")
+        page.add_script_tag(content=fixture)
+        if args.projects:
+            page.evaluate('projectScene();')
         page.evaluate('document.documentElement.dataset.skin="graphite"')
         for count in [500, 2000]:
             for kind in ['sparse', 'all', 'plain', 'compact']:
