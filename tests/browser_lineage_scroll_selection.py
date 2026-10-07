@@ -18,7 +18,9 @@ from tests._sidebar_child_status_helpers import ROOT, component_script  # noqa: 
 
 
 def script(source):
-    component = component_script(source)
+    component = component_script(source).replace(
+        "const animateRefresh=false, searchQueryRaw='';",
+        "const animateRefresh=false;let searchQueryRaw='';")
     # The production grouping/window renderer consumes the same projected rows
     # as the full cache renderer, whose API/filtering seams are not at issue.
     start = source.index('  const flatSessionRows=[];')
@@ -26,7 +28,8 @@ def script(source):
     names = ['_sessionVirtualWindow', '_sessionVirtualSpacer',
              '_scheduleSessionVirtualizedRender', '_ensureSessionVirtualScrollHandler',
              '_markSessionListPointerDown', '_markSessionListPointerUp',
-             '_resyncSessionVirtualWindowAfterRender']
+             '_resyncSessionVirtualWindowAfterRender',
+             '_sessionSearchRanges', '_appendHighlightedText']
 
     for name in ['_sessionVirtualLayoutKey','_sessionVirtualLayout','_sessionVirtualOffsets','_sessionVirtualViewportAnchor','_measureSessionVirtualRows']:
         if 'function '+name+'(' in source:
@@ -41,6 +44,8 @@ let _pendingSessionListPayload=null,_sessionVisibleSidebarIds=[];
 const _groupCollapsed={},_pending=new Set();
 function _saveCollapsed(){}
 const _loadingSessionId=null;
+const $=id=>document.getElementById(id);
+let _hideSearchPreviewsAfterSelect=false;
 function li(){return '<svg width="12" height="12"></svg>';}
 function _sessionTitleForForkParent(){return 'Original parent';}
 function _truncatedSessionId(sid){return sid;}
@@ -50,13 +55,13 @@ let groups=[],renderCount=0;
 function repaint(){
  renderCount++;
  const list=document.querySelector('#sessionList'),listScrollTopBeforeRender=list.scrollTop;
- const q='', searchQueryRaw='';
+ const q=searchQueryRaw;
  const viewportAnchorBeforeRender=typeof _sessionVirtualViewportAnchor==='function'?_sessionVirtualViewportAnchor(list):null;
  list.replaceChildren();
 """ + source[start:end] + r"""
 }
 function scene(density='detailed',kind='children'){
- window._sidebarDensity=density;
+ window._sidebarDensity=density;searchQueryRaw='';
  _expandedChildSessionKeys.clear();_expandedLineageKeys.clear();
  fixtureSessions=[];
  for(let i=0;i<120;i++){
@@ -104,7 +109,7 @@ def main():
             page = context.new_page()
             page.on('pageerror', lambda e: errors.append(str(e)))
             sidebar_width = 180 if touch else 300
-            page.set_content(f'<div id="sessionList" style="width:{sidebar_width}px;height:520px;overflow:auto;background:var(--sidebar)"></div>')
+            page.set_content(f'<input id="sessionSearch" hidden><div id="sessionList" style="width:{sidebar_width}px;height:520px;overflow:auto;background:var(--sidebar)"></div>')
             page.add_style_tag(content=source('static/style.css'))
             page.add_script_tag(content=script(source('static/sessions.js')))
             page.add_script_tag(content=source('static/i18n.js'))
@@ -161,10 +166,21 @@ def main():
             # into the viewport, not merely include it in the overscan DOM.
             for entry in ['reload', 'search-return']:
                 page.evaluate('scene("detailed","children")')
-                page.evaluate('e=>{const l=document.querySelector("#sessionList");l.scrollTop=0;'
-                              'if(e==="reload")delete l.dataset.sessionVirtualActiveAnchor;'
-                              'else l.dataset.sessionVirtualFilter="filtered";'
-                              'activeSidForSidebar="p100";repaint()}', entry)
+                if entry == 'search-return':
+                    page.evaluate('window.unfilteredGroups=groups;searchQueryRaw="Conversation 100";$("sessionSearch").value=searchQueryRaw;'
+                                  'groups=[{label:"Today",items:groups[0].items.filter(s=>s.session_id==="p100")}];'
+                                  'repaint()')
+                    assert page.locator('.session-search-hit').count() > 0
+                    assert page.locator('.session-child-session-delegated').count() == 1
+                    target = page.locator('.session-item[data-sid="p100"] .session-title')
+                    target.tap() if touch else target.click()
+                    page.wait_for_function('opened.at(-1)?.sid === "p100"')
+                    page.evaluate('activeSidForSidebar="p100";repaint();'
+                                  'searchQueryRaw="";$("sessionSearch").value="";groups=unfilteredGroups;repaint()')
+                else:
+                    page.evaluate('const l=document.querySelector("#sessionList");l.scrollTop=0;'
+                                  'delete l.dataset.sessionVirtualActiveAnchor;'
+                                  'activeSidForSidebar="p100";repaint()')
                 page.wait_for_timeout(80)
                 state = page.evaluate('visible()')
                 assert any(r['id'] == 'p100' for r in state['rows']), entry
