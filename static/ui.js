@@ -10439,20 +10439,22 @@ function _todosPanelIsActive(){
 const CHAT_TODOS_LS_KEY='hermes-webui-chat-todos';
 let _chatTodosEnabled=null;             // null = uninitialised; true/false once known
 let _chatTodosInitialised=false;
-let _chatTodosForceHidden=false;        // set when user collapses the tray manually
 
 function _chatTodosReadPref(){
   try{
     const v=localStorage.getItem(CHAT_TODOS_LS_KEY);
-    if(v===null) return true;  // default: enabled
+    // Default OFF (opt-in): the tray hides the sidebar Todos tab and paints a
+    // floating overlay in the transcript, so it must never appear for existing
+    // users who never asked for it. Only an explicit '1' turns it on.
+    if(v===null) return false;
     return v==='1';
-  }catch(_){return true;}
+  }catch(_){return false;}
 }
 function _chatTodosWritePref(v){
   try{
     // Persist both states explicitly ('1' enabled / '0' disabled). Removing the
-    // key on false would collide with first-use default (null => enabled) and
-    // make a user's choice to disable the tray vanish on reload.
+    // key on false would re-collide with the opt-in default and make a user's
+    // choice to enable the tray vanish on reload.
     localStorage.setItem(CHAT_TODOS_LS_KEY,v?'1':'0');
   }catch(_){}
 }
@@ -10489,20 +10491,31 @@ function _syncChatTodosRailVisibility(){
     }
   }
 }
-function _chatTodosToggleEnabled(checked){
-  _setChatTodosEnabled(checked);
+function _syncChatTodosExpanded(open){
   const tray=$('chatTodosPanel');
   if(tray){
-    if(checked){
-      tray.hidden=false;
-      tray.classList.remove('open');       // default collapsed in-chat
-      _chatTodosForceHidden=false;
-    }else{
-      tray.hidden=true;
-    }
+    if(open) tray.classList.add('open');
+    else tray.classList.remove('open');
   }
+  const head=$('chatTodosHead');
+  if(head&&head.setAttribute) head.setAttribute('aria-expanded',open?'true':'false');
+}
+function _chatTodosToggleEnabled(checked){
+  _setChatTodosEnabled(checked);
+  // Keep the settings checkbox in sync for callers that toggle the tray from
+  // elsewhere (e.g. the tab-visibility chip that owns the same hide).
+  const prefCb=$('settingsChatTodosInChat');
+  if(prefCb) prefCb.checked=!!checked;
+  const tray=$('chatTodosPanel');
+  if(tray) tray.hidden=!checked;
+  // Enabling always (re)starts collapsed, and collapsing must drop the
+  // header's aria-expanded too — otherwise a tray expanded, turned off and
+  // turned back on is announced as expanded while its body is hidden.
+  _syncChatTodosExpanded(false);
   renderChatTodos();
-  if(checked&&typeof renderMessages==='function') renderMessages({preserveScroll:true});
+  // Deliberately no whole-transcript rebuild here: the tray is an absolutely
+  // positioned overlay outside the message scroller, so toggling it changes no
+  // transcript layout (a full re-render cost ~256 ms at 300 messages).
   if(typeof _scheduleAppearanceAutosave==='function') _scheduleAppearanceAutosave();
 }
 
@@ -10533,7 +10546,13 @@ function _syncChatTodosAlignRadios(value){
   });
 }
 function _currentTodos(){
-  if(Array.isArray(S.todos)) return S.todos;
+  // `todoStateMeta` is the sentinel for an explicit snapshot (live todo_state
+  // SSE or session cold-load). Without it, S.todos may hold the empty array
+  // hydration installs for an imported/legacy session whose tasks only exist
+  // as role:"tool" messages — returning that array would bypass the legacy
+  // renderer and hide a list that renders today. Explicit empty snapshots
+  // (meta present) still win.
+  if(S.todoStateMeta) return Array.isArray(S.todos)?S.todos:[];
   if(typeof _legacyTodosFromMessages==='function'){
     const legacy=_legacyTodosFromMessages();
     if(Array.isArray(legacy)) return legacy;
@@ -10544,13 +10563,16 @@ function _chatTodosSummary(todos){
   const active=todos.filter(t=>t&&t.status!=='completed'&&t.status!=='cancelled').length;
   const total=todos.length;
   if(!total) return {text:t('todos_no_active')||'No active tasks',active:0,total:0};
-  return {text:`${active===0?'All done':active+' active'} · ${total} total`,active,total};
+  const text=active===0
+    ?t('todos_tray_summary_done',total)
+    :t('todos_tray_summary_active',active,total);
+  return {text,active,total};
 }
 function renderChatTodos(){
   if(typeof $!=='function'||typeof document==='undefined') return;
   const tray=$('chatTodosPanel');
   if(!tray) return;
-  if(!chatTodosEnabled()||_chatTodosForceHidden){
+  if(!chatTodosEnabled()){
     tray.hidden=true;
     return;
   }
@@ -10566,7 +10588,7 @@ function renderChatTodos(){
   const counterEl=$('chatTodosCounter');
   if(counterEl){
     const active=summary.active;
-    counterEl.textContent=active>0?`${active} running`:'';
+    counterEl.textContent=active>0?t('todos_tray_open_count',active):'';
     counterEl.style.display=active>0?'':'none';
   }
   if(!tray.classList.contains('open')){
@@ -10591,9 +10613,8 @@ function renderChatTodos(){
 function toggleChatTodos(){
   const tray=$('chatTodosPanel');
   if(!tray) return;
-  const isOpen=tray.classList.toggle('open');
-  const head=$('chatTodosHead');
-  if(head) head.setAttribute('aria-expanded',isOpen?'true':'false');
+  const isOpen=!tray.classList.contains('open');
+  _syncChatTodosExpanded(isOpen);
   if(isOpen) renderChatTodos();
 }
 function _initChatTodos(){

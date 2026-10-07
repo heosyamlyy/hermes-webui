@@ -7788,6 +7788,13 @@ function _applyTabVisibility(hidden){
   }
 }
 
+function _tabVisibilityChipForcedOff(panel){
+  // The in-chat tray force-hides the sidebar Todos entry, so that panel's own
+  // chip must render OFF and its click must resolve the tray, not flip a
+  // hidden_tabs bit that cannot change what is on screen.
+  return panel==='todos'&&typeof chatTodosEnabled==='function'&&chatTodosEnabled();
+}
+
 function _renderTabVisibilityChips(){
   var container=$('tabVisibilityChips');
   if(!container)return;
@@ -7803,7 +7810,7 @@ function _renderTabVisibilityChips(){
     var chip=document.createElement('button');
     chip.type='button';
     chip.className='tab-visibility-chip';
-    var isOff=hidden.indexOf(panel)!==-1;
+    var isOff=hidden.indexOf(panel)!==-1||_tabVisibilityChipForcedOff(panel);
     if(isOff)chip.classList.add('chip-off');
     chip.textContent=label;
     chip.setAttribute('data-tab-panel',panel);
@@ -7864,6 +7871,16 @@ function _handleTabVisibilityChipDrop(e,targetPanel){
 
 function _toggleTabVisibilityChip(panel){
   if(_ALWAYS_VISIBLE_TABS.has(panel))return;
+  // A tray-forced chip cannot be turned on by editing hidden_tabs: the tray
+  // re-hides the tab on every pass, so two clicks left the chip ON with the
+  // tab still hidden. Turn the tray off instead — it is what owns the hide —
+  // so the click actually restores the sidebar Todos tab.
+  if(_tabVisibilityChipForcedOff(panel)){
+    if(typeof _chatTodosToggleEnabled==='function') _chatTodosToggleEnabled(false);
+    _renderTabVisibilityChips();
+    _scheduleAppearanceAutosave();
+    return;
+  }
   var hidden=_getHiddenTabs();
   var idx=hidden.indexOf(panel);
   if(idx!==-1){

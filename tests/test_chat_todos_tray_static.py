@@ -11,7 +11,11 @@ These verify that the chat-embedded task tray wiring stays intact:
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -94,15 +98,25 @@ def test_rail_hide_helper_targets_todos_panel_and_bounces_to_chat():
     assert "switchPanel('chat'" in helper
 
 
-def test_chat_todos_pref_defaults_to_enabled():
+def test_chat_todos_pref_is_opt_in_by_default():
+    # Maintainer review 2026-10-07T10:30:07Z: "Default the tray to OFF (opt-in)
+    # ... On upgrade every existing user loses the sidebar Todos tab and gets a
+    # floating overlay in the transcript, while the code comment says opt-in."
     ui = _read_static("static/ui.js")
     start = ui.find("function _chatTodosReadPref()")
     end = ui.find("function _chatTodosWritePref", start)
     assert start != -1 and end != -1
     pref = ui[start:end]
 
-    assert "if(v===null) return true;" in pref  # default: enabled
-    assert "v==='1'" in pref
+    assert "if(v===null) return false;" in pref  # default: opt-in / OFF
+    assert "return v==='1';" in pref
+    assert "return true" not in pref
+
+    idx = _read_static("static/index.html")
+    # The boot IIFE may only pre-hide the sidebar Todos tab when the user
+    # explicitly opted in; a missing key must leave the tab alone.
+    assert "if(ct==='1'&&p.indexOf('todos')===-1)p.push('todos')" in idx
+    assert "ct!=='0'" not in idx
 
 
 def test_chat_todos_pref_persists_explicit_disabled():
@@ -133,9 +147,92 @@ def test_chat_todos_aria_initial_collapsed():
     ui = _read_static("static/ui.js")
     toggle_start = ui.find("function toggleChatTodos()")
     assert toggle_start != -1
-    toggle = ui[toggle_start : toggle_start + 600]
-    assert "setAttribute('aria-expanded'" in toggle
-    assert "isOpen?'true':'false'" in toggle or 'isOpen ?' in toggle
+    toggle = ui[toggle_start : toggle_start + 400]
+    assert "_syncChatTodosExpanded(isOpen)" in toggle
+    # ...through the one shared helper, so the settings toggle path cannot
+    # leave a stale aria-expanded behind (maintainer review 2026-10-07).
+    helper_start = ui.find("function _syncChatTodosExpanded(")
+    assert helper_start != -1
+    helper = ui[helper_start : helper_start + 500]
+    assert "setAttribute('aria-expanded',open?'true':'false')" in helper
+
+
+def test_chat_todos_toggle_off_then_on_clears_aria_expanded():
+    # [SILENT] finding: expanding the tray, turning the preference off, then on
+    # again removed `open` but left aria-expanded="true" on the header.
+    ui = _read_static("static/ui.js")
+    start = ui.find("function _chatTodosToggleEnabled(")
+    end = ui.find("function _chatTodosReadAlign", start)
+    assert start != -1 and end != -1
+    block = ui[start:end]
+
+    assert "_syncChatTodosExpanded(false)" in block
+    # The enable path must also (re)start collapsed.
+    assert "tray.hidden=!checked" in block
+
+
+def test_chat_todos_toggle_does_not_rebuild_the_transcript():
+    # [SHOULD-FIX] "Turning the tray on re-renders the whole transcript ...
+    # took 256 ms at 300 messages." The tray is an absolutely positioned
+    # overlay, so toggling it must not call renderMessages().
+    ui = _read_static("static/ui.js")
+    start = ui.find("function _chatTodosToggleEnabled(")
+    end = ui.find("function _chatTodosReadAlign", start)
+    assert start != -1 and end != -1
+    block = ui[start:end]
+
+    assert "renderMessages(" not in block
+
+
+def test_chat_todos_dead_force_hidden_and_progress_css_are_removed():
+    ui = _read_static("static/ui.js")
+    css = _read_static("static/style.css")
+
+    assert "_chatTodosForceHidden" not in ui
+    assert ".chat-todos-progress" not in css
+
+
+def test_chat_todos_content_wraps_long_unbroken_tokens():
+    css = _read_static("static/style.css")
+    assert (
+        ".chat-todos-row .todos-content{flex:1 1 auto;min-width:0;font-size:12.5px;"
+        "line-height:1.4;overflow-wrap:anywhere;}" in css
+    )
+    assert "@media(prefers-reduced-motion:reduce){.chat-todos-head{transition:none;}" in css
+
+
+def test_chat_todos_tray_strings_are_localized():
+    ui = _read_static("static/ui.js")
+    start = ui.find("function _chatTodosSummary(")
+    end = ui.find("function toggleChatTodos()", start)
+    assert start != -1 and end != -1
+    block = ui[start:end]
+
+    assert "t('todos_tray_summary_done',total)" in block
+    assert "t('todos_tray_summary_active',active,total)" in block
+    assert "t('todos_tray_open_count',active)" in block
+    # No hardcoded English summaries survive.
+    assert "'All done'" not in block
+    assert "running`" not in block
+
+    idx = _read_static("static/index.html")
+    # The radiogroup label is translated too.
+    assert 'aria-label="Task list alignment" data-i18n-aria-label="settings_label_chat_todos_align"' in idx
+
+
+def test_chat_todos_chip_reflects_the_tray_forced_hide():
+    # [SHOULD-FIX] "With the tray on, the chip reports ON while the tab is
+    # hidden, and two clicks leave it ON with the tab still hidden."
+    panels = _read_static("static/panels.js")
+    assert "function _tabVisibilityChipForcedOff(panel){" in panels
+    assert "return panel==='todos'&&typeof chatTodosEnabled==='function'&&chatTodosEnabled();" in panels
+    assert "var isOff=hidden.indexOf(panel)!==-1||_tabVisibilityChipForcedOff(panel);" in panels
+    chip_start = panels.find("function _toggleTabVisibilityChip(panel)")
+    chip_end = panels.find("function _toggleDashboardVisibilityChip", chip_start)
+    assert chip_start != -1 and chip_end != -1
+    handler = panels[chip_start:chip_end]
+    assert "if(_tabVisibilityChipForcedOff(panel)){" in handler
+    assert "_chatTodosToggleEnabled(false)" in handler
 
 
 def test_chat_todos_hidden_tab_collision():
@@ -163,6 +260,10 @@ def test_chat_todos_i18n_keys_in_all_locales():
         "settings_option_chat_todos_align_left",
         "settings_option_chat_todos_align_center",
         "settings_option_chat_todos_align_right",
+        # Tray strings moved behind t() (maintainer review 2026-10-07).
+        "todos_tray_summary_active",
+        "todos_tray_summary_done",
+        "todos_tray_open_count",
     }
     # LOCALES segmentation: each locale starts at "  <code>: {" and ends before
     # the next locale header. Using header boundaries avoids a fragile
@@ -224,3 +325,182 @@ def test_rail_hide_helper_does_not_clobber_a_user_hidden_tab():
     # ...and tray-on still suppresses the duplicate sidebar surface + bounces.
     assert "classList.add('nav-tab-hidden')" in helper
     assert "switchPanel('chat'" in helper
+
+
+# ── Behavior probes: the real frontend functions, run under node ──────────
+# The maintainer reproduced the imported-list regression "with the real
+# frontend functions", so these extract the shipped source of the functions
+# under test and run them instead of asserting on their text.
+
+
+def _extract(source: str, start_marker: str, end_marker: str) -> str:
+    start = source.find(start_marker)
+    assert start != -1, f"missing {start_marker!r}"
+    end = source.find(end_marker, start)
+    assert end != -1, f"missing {end_marker!r} after {start_marker!r}"
+    return source[start:end]
+
+
+def _run_node(tmp_path: Path, name: str, script: str) -> str:
+    if shutil.which("node") is None:
+        pytest.skip("node is required for the frontend behavior probe")
+    script_path = tmp_path / name
+    script_path.write_text(script, encoding="utf-8")
+    result = subprocess.run(
+        ["node", str(script_path)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    return result.stdout
+
+
+_CURRENT_TODOS_PROBE = """
+const S = {todos: [], todoStateMeta: null, messages: [], session: null};
+__LEGACY__
+__HELPER__
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+
+// Case A — the regression: hydration installs an empty S.todos for an imported
+// session whose tasks only exist as role:"tool" messages, with no todoStateMeta.
+S.session = {messages: [{role: 'tool', content: JSON.stringify({todos: [{id: 'a', content: 'imported', status: 'pending'}]})}]};
+S.messages = S.session.messages;
+S.todos = [];
+S.todoStateMeta = null;
+let got = _currentTodos();
+assert(got.length === 1 && got[0].id === 'a', 'imported tool-message list must fall back to the legacy renderer');
+
+// Case B — an explicit empty snapshot still wins (no spurious legacy revival).
+S.todoStateMeta = {ts: 1, source: 'cold-load', version: 1};
+assert(_currentTodos().length === 0, 'explicit empty snapshot must win');
+
+// Case C — an explicit non-empty snapshot is returned as-is.
+S.todos = [{id: 'x', content: 'X', status: 'pending'}];
+got = _currentTodos();
+assert(got.length === 1 && got[0].id === 'x', 'explicit snapshot must be returned');
+
+// Case D — no snapshot AND no legacy messages => empty.
+S.todoStateMeta = null;
+S.todos = [];
+S.session = {messages: []};
+S.messages = [];
+assert(_currentTodos().length === 0, 'no signal and no legacy list => empty');
+console.log('ok');
+"""
+
+
+def test_current_todos_falls_back_to_legacy_for_imported_tool_lists(tmp_path):
+    ui = _read_static("static/ui.js")
+    panels = _read_static("static/panels.js")
+    helper = _extract(ui, "function _currentTodos(){", "function _chatTodosSummary(")
+    legacy = panels[panels.find("function _legacyTodosFromMessages() {"):]
+    legacy = legacy[: legacy.find("\n}") + 2]
+    assert legacy.rstrip().endswith("}")
+    script = _CURRENT_TODOS_PROBE.replace("__LEGACY__", legacy).replace("__HELPER__", helper)
+    assert _run_node(tmp_path, "current_todos_probe.js", script).strip() == "ok"
+
+
+_SUMMARY_PROBE = """
+const table = {
+  todos_no_active: 'No active task list in this session.',
+  todos_tray_summary_active: '{0} active · {1} total',
+  todos_tray_summary_done: 'All done · {0} total',
+};
+function t(key, ...args) {
+  let v = table[key];
+  if (v === undefined) return key;
+  if (args.length) v = String(v).replace(/\\{(\\d+)\\}/g, (m, i) => (args[i] !== undefined ? String(args[i]) : m));
+  return v;
+}
+__HELPER__
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+const mixed = _chatTodosSummary([{status: 'pending'}, {status: 'in_progress'}, {status: 'completed'}]);
+assert(mixed.text === '2 active · 3 total', 'localized active/total summary');
+assert(mixed.active === 2 && mixed.total === 3, 'counts derive from statuses');
+const done = _chatTodosSummary([{status: 'completed'}, {status: 'cancelled'}]);
+assert(done.text === 'All done · 2 total', 'localized all-done summary');
+assert(done.active === 0 && done.total === 2, 'terminal-only counts');
+assert(_chatTodosSummary([]).text === 'No active task list in this session.', 'empty summary uses i18n');
+console.log('ok');
+"""
+
+
+def test_chat_todos_summary_uses_localized_placeholders(tmp_path):
+    ui = _read_static("static/ui.js")
+    helper = _extract(ui, "function _chatTodosSummary(", "function renderChatTodos(){")
+    script = _SUMMARY_PROBE.replace("__HELPER__", helper)
+    assert _run_node(tmp_path, "summary_probe.js", script).strip() == "ok"
+
+
+_EXPANDED_PROBE = """
+const head = {attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }};
+const tray = {
+  classes: new Set(),
+  classList: {
+    add(c) { tray.classes.add(c); },
+    remove(c) { tray.classes.delete(c); },
+    contains(c) { return tray.classes.has(c); },
+  },
+};
+function $(id) { return id === 'chatTodosPanel' ? tray : (id === 'chatTodosHead' ? head : null); }
+__HELPER__
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+_syncChatTodosExpanded(true);
+assert(tray.classes.has('open'), 'expand adds .open');
+assert(head.attrs['aria-expanded'] === 'true', 'expand sets aria-expanded=true');
+_syncChatTodosExpanded(false);
+assert(!tray.classes.has('open'), 'collapse removes .open');
+assert(head.attrs['aria-expanded'] === 'false', 'collapse sets aria-expanded=false');
+console.log('ok');
+"""
+
+
+def test_sync_chat_todos_expanded_keeps_aria_in_sync(tmp_path):
+    ui = _read_static("static/ui.js")
+    helper = _extract(ui, "function _syncChatTodosExpanded(", "function _chatTodosToggleEnabled(")
+    script = _EXPANDED_PROBE.replace("__HELPER__", helper)
+    assert _run_node(tmp_path, "expanded_probe.js", script).strip() == "ok"
+
+
+def test_chat_todos_locales_keep_diacritics():
+    # [SHOULD-FIX] "Eight locales ship diacritic-stripped text (it, es, pt, fr,
+    # cs, tr, pl, vi). Vietnamese is unreadable as shipped."
+    src = _read_static("static/i18n.js")
+    required = {
+        "attività": "it",
+        "attivo": "it",
+        "área": "es",
+        "duplicación": "es",
+        "Alineación": "es",
+        "recolhível": "pt",
+        "duplicação": "pt",
+        "tâches": "fr",
+        "Activée": "fr",
+        "latérale": "fr",
+        "úkolů": "cs",
+        "sbalitelný": "cs",
+        "Zarovnání": "cs",
+        "duplicitě": "cs",
+        "üst kısmında": "tr",
+        "görev": "tr",
+        "önlemek": "tr",
+        "Pokaż": "pl",
+        "Wyświetla": "pl",
+        "Wyrównanie": "pl",
+        "Środek": "pl",
+        "bảng Todos": "vi",
+        "trùng lặp": "vi",
+        "Căn chỉnh": "vi",
+        "Giữa": "vi",
+    }
+    for needle, locale in required.items():
+        assert needle in src, f"{locale} lost its diacritics: {needle!r}"
+    # Robustness floor: the share of non-ASCII characters in the vi block must
+    # not collapse back to pure ASCII.
+    start = src.find("\n  vi: {")
+    assert start != -1
+    vi_block = src[start : src.find("\n  },", start)]
+    non_ascii = sum(1 for ch in vi_block if ord(ch) > 127)
+    assert non_ascii > 200, f"vi locale looks diacritic-stripped ({non_ascii} non-ASCII chars)"
