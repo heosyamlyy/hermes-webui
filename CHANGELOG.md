@@ -5,6 +5,13 @@
 
 ### Added
 
+- **An optional task-list tray at the top of the chat.** When the agent keeps a task list, Settings → Appearance → "Show
+  task list in chat" shows it as a collapsible strip above the conversation ("3 active · 6 total"), aligned with the
+  reading column, instead of only in the workspace Todos tab (which is disabled with a note while the tray is on). It
+  stays out of the way: collapsed it is one 35px band, expanded it is capped so the conversation keeps at least half the
+  height on short screens, it never moves a reader who has scrolled away, and the Start button stays clear of it. Off by
+  default. Thanks @silent-reader-cn. (#6978)
+
 - **French voices for Edge text-to-speech.** Nine French Edge TTS voices are allowed and listed in Settings, grouped by
   language, with the child voice labelled as such. Thanks @ruizanthony. (#7444)
 
