@@ -71,10 +71,24 @@ chip expansion at the minimum width: focus must not retarget its synthetic click
 
 `python tests/browser_child_chip_ownership.py --output <artifact-directory>`
 checks concurrent child activity is contained in the chip, independently of the
-parent's own unread/approval dot. At 180/220/240/300px across every locale it
-measures five actual title glyphs plus ellipsis, the count's first glyph and both
-status marks, then exercises keyboard/touch disclosure and child navigation.
+parent's own unread/approval dot. At 180/220/240/300/360px across every locale,
+ordinary rows must retain five actual title glyphs plus ellipsis, the count's first
+glyph and both status marks. Separate badge-heavy 180px rows retain the existing
+24px title floor, not a five-glyph guarantee. Keyboard/touch checks exercise
+both child navigation targets, equal 44px phone row/button heights, and the
+narrow-fine/wide-coarse sides of the touch-target media query.
 Use `--before-ref <commit>` for red-before evidence and screenshots.
+
+`python tests/browser_archived_child_label.py --output <artifact-directory>`
+checks reference-only title glyphs and hit-tested status marks at 180/220/240px
+across every locale, both densities, selected/inactive rows, light/dark Graphite,
+Default, Catppuccin and Geist Contrast. The separate normal-width matrix keeps
+the full child-qualified label readable at 300/360px with parent-own notification
+gutters. Narrow reference chips use a 50% cap and intrinsic title basis when the
+session text content box is at most 180px; wider content retains the 60% cap and
+flexible title basis so localized `Archived child` remains readable. The full
+child-qualified explanation stays in tooltip/ARIA; the chip remains `role="img"`,
+not an empty disclosure button.
 
 `python tests/browser_child_title_spacing.py --output <artifact-directory>`
 checks fork/worktree/project badge combinations at 180–240px and compares

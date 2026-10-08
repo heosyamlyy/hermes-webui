@@ -141,7 +141,7 @@ def main():
             if args.representative:
                 locales = ['en', 'de', 'ru']
             for width, locale, skin, dark, selected, density, own in product(
-                [180, 300], locales, ['graphite', 'default', 'catppuccin', 'geist-contrast'],
+                [180, 220, 240, 300, 360], locales, ['graphite', 'default', 'catppuccin', 'geist-contrast'],
                 [False, True], ['other', 'parent'], ['compact', 'detailed'],
                 ['idle', 'unread', 'approval', 'clarify', 'streaming'],
             ):
@@ -209,16 +209,70 @@ def main():
                     chip.press('Enter')
                 if page.locator('.session-child-session').count() != 2:
                     errors.append(f'disclosure failed: {viewport}/{skin}/{dark}/{own}')
-                page.locator('.session-child-session-delegated').click()
+                fork = page.locator('.session-child-session-fork')
+                delegated = page.locator('.session-child-session-delegated')
+                main = fork.locator('.session-child-session-main')
+                geometry = page.evaluate('''()=>({
+                    coarse:matchMedia('(pointer:coarse)').matches,
+                    narrow:matchMedia('(max-width:768px)').matches,
+                    fork:document.querySelector('.session-child-session-fork').getBoundingClientRect().height,
+                    main:document.querySelector('.session-child-session-main').getBoundingClientRect().height,
+                    delegated:document.querySelector('.session-child-session-delegated').getBoundingClientRect().height})''')
+                if geometry['coarse'] != touch:
+                    errors.append(f'pointer fixture mismatch: {geometry}')
+                failures = []
+                if geometry['coarse'] or geometry['narrow']:
+                    if min(geometry['fork'], geometry['main'], geometry['delegated']) < 44 or abs(geometry['fork'] - geometry['delegated']) > .5:
+                        failures.append('fork and delegated touch targets differ or fall below 44px')
+                results.append(dict(viewport=viewport, interaction=True, skin=skin, dark=dark, own=own,
+                                    data=geometry, failures=failures))
+                if touch:
+                    main.tap()
+                else:
+                    main.focus()
+                    main.press('Enter')
+                if page.evaluate('opened.at(-1).sid') != 'fork':
+                    errors.append(f'fork navigation failed: {viewport}/{skin}/{dark}/{own}')
+                if touch:
+                    delegated.tap()
+                else:
+                    delegated.focus()
+                    delegated.press('Enter')
                 if page.evaluate('opened.at(-1).sid') != 'delegated':
                     errors.append(f'child navigation failed: {viewport}/{skin}/{dark}/{own}')
             page.screenshot(path=str(args.output / f'{viewport}-expanded.png'))
+            page.locator('#fixture').evaluate('(e)=>e.style.width="300px"')
+            page.evaluate('setLocale("en");scene("streaming",true,"parent","detailed")')
+            page.screenshot(path=str(args.output / f'{viewport}-mixed-300.png'))
             page.locator('#fixture').evaluate('(e)=>e.style.width="180px"')
             page.evaluate('document.documentElement.classList.remove("dark");scene("unread",false,"other","detailed")')
             page.wait_for_timeout(200)
             page.screenshot(path=str(args.output / f'{viewport}-180-light-detailed.png'))
             page.evaluate('scene("idle",false,"other","detailed")')
             page.screenshot(path=str(args.output / f'{viewport}-180-light-time.png'))
+            # Exercise both sides of the OR media query independently, rather
+            # than inferring pointer capability from the viewport width.
+            for extra_viewport, extra_touch in [(1280, True), (390, False)] if viewport == 1280 else []:
+                extra = browser.new_context(viewport={'width': extra_viewport, 'height': 800}, has_touch=extra_touch)
+                probe = extra.new_page()
+                probe.set_content('<main id="fixture" style="padding:8px;width:300px;box-sizing:border-box"></main>')
+                probe.add_style_tag(content=source('static/style.css'))
+                probe.add_script_tag(content=component_script(source('static/sessions.js')))
+                probe.add_script_tag(content=source('static/i18n.js'))
+                probe.add_script_tag(content=SCENE)
+                probe.evaluate('scene("approval",true,"parent","detailed")')
+                geometry = probe.evaluate('''()=>({coarse:matchMedia('(pointer:coarse)').matches,
+                    narrow:matchMedia('(max-width:768px)').matches,
+                    fork:document.querySelector('.session-child-session-fork').getBoundingClientRect().height,
+                    main:document.querySelector('.session-child-session-main').getBoundingClientRect().height,
+                    delegated:document.querySelector('.session-child-session-delegated').getBoundingClientRect().height})''')
+                failures = []
+                if geometry['coarse'] != extra_touch or geometry['narrow'] != (extra_viewport == 390):
+                    failures.append('media query fixture mismatch')
+                if min(geometry['fork'], geometry['main'], geometry['delegated']) < 44 or abs(geometry['fork'] - geometry['delegated']) > .5:
+                    failures.append('fork and delegated touch targets differ or fall below 44px')
+                results.append(dict(viewport=extra_viewport, touch=extra_touch, media_probe=True, data=geometry, failures=failures))
+                extra.close()
             context.close()
         browser.close()
     report = dict(cases=len(results), failures=sum(bool(r['failures']) for r in results), errors=errors, results=results)

@@ -3,6 +3,7 @@ import argparse
 import json
 import subprocess
 import sys
+from itertools import product
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -36,8 +37,8 @@ def main():
             page.add_script_tag(content=component_script(source('static/sessions.js')))
             page.add_script_tag(content=source('static/i18n.js'))
             page.add_script_tag(content=SCENE + r"""
-function referenceScene(state,density){
- scene(true,'approval','other');
+function referenceScene(state,density,selected='other'){
+ scene(true,'approval',selected);
  const s=fixtureSessions.find(s=>s.session_id==='parent');
  s.has_unread=state==='unread';s.is_streaming=state==='running';
  s.attention=['approval','clarify'].includes(state)?{kind:state,count:1}:null;
@@ -54,6 +55,11 @@ function referenceGeometry(){
  const lr=label.getBoundingClientRect(),textWidth=range.getBoundingClientRect().width;
  return {label:label.textContent,labelWidth:lr.width,textWidth,labelReadable:textWidth<=lr.width+.5,
    titleWidth:document.querySelector('.session-title').getBoundingClientRect().width,
+   glyphsFit:(()=>{const title=document.querySelector('.session-title'),tr=title.getBoundingClientRect();
+     range.setStart(title.firstChild,0);range.setEnd(title.firstChild,5);
+     const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');ctx.font=getComputedStyle(title).font;
+     return range.getBoundingClientRect().right+ctx.measureText('…').width<=tr.right+.5;})(),
+   aria:chip.getAttribute('aria-label'),full:t('session_child_archived'),short:t('session_child_archived_short'),
    markVisible:r.left>=clip.left&&r.right<=clip.right&&!!hit&&(hit===mark||mark.contains(hit)),
    role:chip.getAttribute('role'),tooltip:chip.title};
 }
@@ -69,8 +75,10 @@ function referenceGeometry(){
                             page.evaluate('([s,d])=>referenceScene(s,d)', [state, density])
                             data = page.evaluate('referenceGeometry()')
                             failures = []
-                            if not data['markVisible'] or data['titleWidth'] < 24:
-                                failures.append('status mark or title floor lost')
+                            if not data['markVisible'] or not data['glyphsFit']:
+                                failures.append('status mark or primary title recognition lost')
+                            if data['label'] != data['short'] or data['full'] not in data['aria'] or data['aria'] != data['tooltip']:
+                                failures.append('child-qualified archived explanation lost')
                             if width >= 300 and not data['labelReadable']:
                                 failures.append('child-qualified label clipped at normal width')
                             if data['role'] != 'img':
@@ -83,7 +91,25 @@ function referenceGeometry(){
                                 page.evaluate('document.documentElement.classList.add("dark")')
                             results.append(dict(viewport=viewport, width=width, locale=locale, density=density,
                                                 state=state, data=data, failures=failures))
-            page.evaluate('setLocale("de");document.documentElement.classList.add("dark")')
+            for width, locale, skin, dark, selected, density, state in product(
+                [180, 220, 240], locales, ['graphite', 'default', 'catppuccin', 'geist-contrast'],
+                [False, True], ['other', 'parent'], ['compact', 'detailed'],
+                ['idle', 'unread', 'approval', 'clarify', 'running'],
+            ):
+                page.evaluate('a=>{document.querySelector("#fixture").style.width=a[0]+"px";setLocale(a[1]);'
+                              'document.documentElement.dataset.skin=a[2];document.documentElement.classList.toggle("dark",a[3]);'
+                              'referenceScene(a[6],a[5],a[4])}', [width, locale, skin, dark, selected, density, state])
+                data = page.evaluate('referenceGeometry()')
+                failures = []
+                if not data['markVisible'] or not data['glyphsFit']:
+                    failures.append('status mark or primary title recognition lost')
+                if data['role'] != 'img' or data['label'] != data['short'] or data['full'] not in data['aria']:
+                    failures.append('reference-only child semantics lost')
+                results.append(dict(viewport=viewport, width=width, locale=locale, skin=skin, dark=dark,
+                                    selected=selected, density=density, state=state, data=data, failures=failures))
+                if width == 180 and locale == 'de' and skin == 'graphite' and selected == 'other' and density == 'compact' and state == 'approval':
+                    page.screenshot(path=str(args.output / f'{viewport}-de-180-{dark}.png'))
+            page.evaluate('setLocale("de");document.documentElement.dataset.skin="graphite";document.documentElement.classList.add("dark")')
             for width in [180, 300]:
                 page.locator('#fixture').evaluate('(e,w)=>e.style.width=w+"px"', width)
                 page.evaluate('referenceScene("approval","detailed")')
