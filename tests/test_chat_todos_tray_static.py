@@ -943,10 +943,18 @@ def test_chat_todos_rows_are_centred_on_the_reading_column():
     assert "@media(min-width:1400px){.chat-todos-rows{max-width:calc(var(--msg-max) + 40px);}}" in css
     assert "@media(min-width:1800px){.chat-todos-rows{max-width:calc(var(--msg-max) + 80px);}}" in css
     assert (
-        "@media(max-width:640px){.chat-todos-rows{max-width:100%;"
+        ".chat-todos-rows{max-width:100%;"
         "padding-left:max(10px,env(safe-area-inset-left,0));"
-        "padding-right:max(10px,env(safe-area-inset-right,0));}}" in css
+        "padding-right:max(10px,env(safe-area-inset-right,0));}" in css
     )
+    # ...and that mobile mirror lives inside the EXISTING <=640px block, right
+    # after .messages-inner's own override: a second `@media(max-width:640px)`
+    # would have to come first in the file and would break the mobile-containment
+    # tests that brace-match the first one (test_issue4553 / test_issue4856).
+    inner_mobile = css.index(".messages-inner{padding:12px 10px 20px;")
+    mirror = css.index(".chat-todos-rows{max-width:100%;")
+    assert inner_mobile < mirror
+    assert "@media(" not in css[inner_mobile:mirror]
     # ...and the column it mirrors really is the transcript's.
     assert ".messages-inner{margin:0 auto;width:100%;padding:20px 24px 32px;" in css
     assert ".messages-inner { max-width: var(--msg-max); }" in css

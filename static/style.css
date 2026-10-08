@@ -2286,14 +2286,14 @@
     .chat-todos:not(.open) .chat-todos-body{display:none;}
     /* The rows come from the ONE shared row renderer (renderTodoRow), so the tray
        owns no row styling any more — it only centres that renderer on the
-       transcript's reading column (re-gate 2026-10-08T03:10:50Z). That column
-       is .messages-inner's, so these rules (plus the <=640px mirror below)
-       intentionally repeat its max-width/padding contract: the row text then
-       lines up with the message text at every width. */
+       transcript's reading column (re-gate 2026-10-08T03:10:50Z). That column is
+       .messages-inner's, so these rules repeat its --msg-max contract (its
+       <=640px mobile override lives next to .messages-inner's own, where that
+       block's containment rules are asserted): the row text lines up with the
+       message text at every width. */
     .chat-todos-rows{margin:0 auto;width:100%;padding:0 24px;max-width:var(--msg-max);}
     @media(min-width:1400px){.chat-todos-rows{max-width:calc(var(--msg-max) + 40px);}}
     @media(min-width:1800px){.chat-todos-rows{max-width:calc(var(--msg-max) + 80px);}}
-    @media(max-width:640px){.chat-todos-rows{max-width:100%;padding-left:max(10px,env(safe-area-inset-left,0));padding-right:max(10px,env(safe-area-inset-right,0));}}
     .chat-todos-row:last-child{border-bottom:none;}
     .chat-todos-empty{font-size:12px;color:var(--muted);padding:8px 2px;}
     /* Overflow cue: the capped body scrolls with an overlay scrollbar that mobile
@@ -3196,6 +3196,11 @@
        intent) WITHOUT coercing overflow-y or creating a scroll container, so
        min-height:auto stays min-content and the inner grows normally. */
     .messages-inner{padding:12px 10px 20px;max-width:100%;overflow-x:clip;word-break:break-word;min-width:0;padding-left:max(10px,env(safe-area-inset-left,0));padding-right:max(10px,env(safe-area-inset-right,0));}
+    /* The in-chat task tray centres its rows on that same reading column, so it
+       takes the same <=640px override as its neighbour above (re-gate
+       2026-10-08T03:10:50Z). Kept in THIS block — not a second @media — so the
+       mobile containment rules asserted for .messages-inner stay together. */
+    .chat-todos-rows{max-width:100%;padding-left:max(10px,env(safe-area-inset-left,0));padding-right:max(10px,env(safe-area-inset-right,0));}
     .msg-body{padding-left:0;max-width:100%;}
     .msg-role{font-size:12px;}
     .composer-wrap{padding:8px 10px calc(12px + var(--keyboard-bottom-inset, 0px))!important;padding-left:max(10px,env(safe-area-inset-left,0))!important;padding-right:max(10px,env(safe-area-inset-right,0))!important;}
