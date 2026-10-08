@@ -109,7 +109,27 @@ function referenceGeometry(){
                                     selected=selected, density=density, state=state, data=data, failures=failures))
                 if width == 180 and locale == 'de' and skin == 'graphite' and selected == 'other' and density == 'compact' and state == 'approval':
                     page.screenshot(path=str(args.output / f'{viewport}-de-180-{dark}.png'))
-            page.evaluate('setLocale("de");document.documentElement.dataset.skin="graphite";document.documentElement.classList.add("dark")')
+            # Exercise wider system-font metrics independently of the host's
+            # preferred UI font, especially around the narrow-content breakpoint.
+            for width, font, skin, selected, density, state in product(
+                [220, 240, 300], ['Arial', 'DejaVu Sans'], ['default', 'catppuccin'],
+                ['other', 'parent'], ['compact', 'detailed'], ['idle', 'unread', 'approval'],
+            ):
+                page.evaluate('a=>{document.querySelector("#fixture").style.width=a[0]+"px";setLocale("de");'
+                              'document.documentElement.style.setProperty("--font-ui",a[1]+",sans-serif");'
+                              'document.documentElement.dataset.skin=a[2];'
+                              'referenceScene(a[5],a[4],a[3])}', [width, font, skin, selected, density, state])
+                data = page.evaluate('referenceGeometry()')
+                failures = []
+                if not data['markVisible'] or not data['glyphsFit']:
+                    failures.append('status mark or primary title recognition lost')
+                if width >= 300 and not data['labelReadable']:
+                    failures.append('child-qualified label clipped at normal width')
+                results.append(dict(viewport=viewport, width=width, font=font, skin=skin,
+                                    selected=selected, density=density, state=state, data=data, failures=failures))
+                if width == 220 and font == 'DejaVu Sans' and skin == 'default' and selected == 'other' and density == 'compact' and state == 'idle':
+                    page.screenshot(path=str(args.output / f'{viewport}-de-220-system-font.png'))
+            page.evaluate('document.documentElement.style.removeProperty("--font-ui");setLocale("de");document.documentElement.dataset.skin="graphite";document.documentElement.classList.add("dark")')
             for width in [180, 300]:
                 page.locator('#fixture').evaluate('(e,w)=>e.style.width=w+"px"', width)
                 page.evaluate('referenceScene("approval","detailed")')

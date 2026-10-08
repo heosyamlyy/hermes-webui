@@ -5738,7 +5738,7 @@ main.main > #mainPlugin{display:none;}
 /* Reference wording stays complete at normal sidebar widths; in a narrow
    content box it yields to the primary title just like a navigable count. */
 .session-text:has(.session-child-count){container-type:inline-size;}
-@container (max-width:180px){
+@container (max-width:220px){
   .session-child-count:not([role="button"]){max-width:50%;}
   .session-title-row:has(.session-child-count:not([role="button"])) .session-title{flex-basis:auto;}
 }
