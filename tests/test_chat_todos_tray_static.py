@@ -866,8 +866,15 @@ def test_chat_todos_repin_gates_on_auto_follow_and_a_real_box_growth():
     ui = _read_static("static/ui.js")
     block = _extract(ui, "function _repinChatTodosTranscript(){", "function renderChatTodos(){")
     assert "window._autoScrollFollow===false) return;" in block
-    assert block.index("_autoScrollFollow") < block.index("_measureChatTodosTrayHeight()")
-    assert "if(h<=_chatTodosRepinH)" in block
+    # The box is measured BEFORE the Auto-follow gate (re-gate 2026-10-08T06:40:51Z):
+    # when the gate returned first, a hide with Auto-follow OFF never recorded the
+    # zero height, so a later re-show with follow ON compared against the stale
+    # pre-hide height, read "not grown", and skipped the re-pin.
+    assert block.index("_measureChatTodosTrayHeight()") < block.index(
+        "window._autoScrollFollow===false) return;"
+    )
+    assert "const grew=h>_chatTodosRepinH;" in block
+    assert "_chatTodosRepinH=h;" in block
     # The measurement is factored out so the observer and the repin share it.
     assert "function _measureChatTodosTrayHeight(){" in ui
     assert "const h=Math.round(_measureChatTodosTrayHeight());" in ui
@@ -884,12 +891,15 @@ function _repinMessagesAfterComposerResize() { repins++; }
 __HELPER__
 
 // 1. Auto-follow OFF: even a real growth must not touch the scroll position.
+//    The box is still recorded on the baseline (that is the whole point of the
+//    re-gate fix), so the growth below is NOT replayed once follow turns on.
 boxHeight = 276;
 _repinChatTodosTranscript();
 assert(repins === 0, 'auto-follow OFF must never re-pin');
 
-// 2. Auto-follow ON: one measured growth re-pins exactly once.
+// 2. Auto-follow ON: the next measured growth re-pins exactly once.
 window._autoScrollFollow = true;
+boxHeight = 400;
 _repinChatTodosTranscript();
 assert(repins === 1, 'a measured growth re-pins the transcript');
 _repinChatTodosTranscript();
@@ -903,7 +913,7 @@ _repinChatTodosTranscript();
 assert(repins === 1, 'a shrink must not re-pin');
 
 // 4. Re-expanding grows it again.
-boxHeight = 276;
+boxHeight = 400;
 _repinChatTodosTranscript();
 assert(repins === 2, 're-expanding re-pins again');
 
@@ -915,6 +925,26 @@ boxHeight = 0;
 _repinChatTodosTranscript();
 _repinChatTodosTranscript();
 assert(repins === 0, 'a hidden tray (feature OFF) must not pull the reader down');
+
+// 6. Hide-then-show with Auto-follow toggled (re-gate 2026-10-08T06:40:51Z).
+//    Before the fix the follow gate returned BEFORE measuring, so a hide with
+//    Auto-follow OFF left the stale pre-hide height on the books; re-showing
+//    the tray at the SAME height then read "not grown" and skipped the re-pin,
+//    stranding a pinned reader.
+repins = 0;
+tray.hidden = false;
+window._autoScrollFollow = true;
+boxHeight = 276;
+_repinChatTodosTranscript();
+assert(repins === 1, 'baseline: an expanded tray re-pins with follow ON');
+window._autoScrollFollow = false;
+tray.hidden = true; boxHeight = 0; // hidden WHILE follow is OFF
+_repinChatTodosTranscript();
+assert(repins === 1, 'a hide with follow OFF must not re-pin');
+window._autoScrollFollow = true;
+tray.hidden = false; boxHeight = 276; // re-shown at the SAME height
+_repinChatTodosTranscript();
+assert(repins === 2, 're-show after a follow-OFF hide re-pins (stale baseline fixed)');
 console.log('ok');
 """
 

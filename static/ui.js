@@ -10655,10 +10655,19 @@ function _repinChatTodosTranscript(){
   //      cannot strand a pinned reader: a growing viewport only lowers
   //      scrollHeight - clientHeight, which the browser clamps for us.
   // The helper below is a no-op anyway when the reader scrolled away.
-  if(typeof window!=='undefined'&&window._autoScrollFollow===false) return;
+  //
+  // The box must be measured BEFORE the Auto-follow gate (reviewer re-gate
+  // 2026-10-08T06:40:51Z, [SHOULD-FIX]): when the gate returned first, a hide
+  // with Auto-follow OFF never recorded the zero height, so a later re-show
+  // with follow ON compared against the stale pre-hide height, read "not
+  // grown", and skipped the re-pin — stranding a pinned reader. Tracking the
+  // box unconditionally (follow OUT of the measurement) keeps the baseline
+  // honest; only the ACTUAL re-pin stays gated.
   const h=Math.round(_measureChatTodosTrayHeight());
-  if(h<=_chatTodosRepinH){ _chatTodosRepinH=h; return; }
+  const grew=h>_chatTodosRepinH;
   _chatTodosRepinH=h;
+  if(typeof window!=='undefined'&&window._autoScrollFollow===false) return;
+  if(!grew) return;
   if(typeof _repinMessagesAfterComposerResize==='function') _repinMessagesAfterComposerResize();
 }
 function renderChatTodos(){
