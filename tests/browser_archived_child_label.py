@@ -66,69 +66,98 @@ function referenceGeometry(){
 """)
             page.evaluate('document.documentElement.dataset.skin="graphite";document.documentElement.classList.add("dark")')
             locales = page.evaluate('Object.keys(LOCALES)')
-            for width in [180, 300, 360]:
-                page.locator('#fixture').evaluate('(e,w)=>e.style.width=w+"px"', width)
-                for locale in locales:
-                    page.evaluate('setLocale', locale)
-                    for density in ['compact', 'detailed']:
-                        for state in ['idle', 'unread', 'approval', 'clarify', 'running']:
-                            page.evaluate('([s,d])=>referenceScene(s,d)', [state, density])
-                            data = page.evaluate('referenceGeometry()')
-                            failures = []
-                            if not data['markVisible'] or not data['glyphsFit']:
-                                failures.append('status mark or primary title recognition lost')
-                            if data['label'] != data['short'] or data['full'] not in data['aria'] or data['aria'] != data['tooltip']:
-                                failures.append('child-qualified archived explanation lost')
-                            if width >= 300 and not data['labelReadable']:
-                                failures.append('child-qualified label clipped at normal width')
-                            if data['role'] != 'img':
-                                failures.append('reference-only chip became an expander')
-                            if locale == 'de' and width == 300 and density == 'compact' and state == 'approval':
-                                page.screenshot(path=str(args.output / f'{viewport}-de-300-dark.png'))
-                                page.evaluate('document.documentElement.classList.remove("dark")')
-                                page.wait_for_timeout(180)
-                                page.screenshot(path=str(args.output / f'{viewport}-de-300-light.png'))
-                                page.evaluate('document.documentElement.classList.add("dark")')
-                            results.append(dict(viewport=viewport, width=width, locale=locale, density=density,
-                                                state=state, data=data, failures=failures))
-            for width, locale, skin, dark, selected, density, state in product(
-                [180, 220, 240], locales, ['graphite', 'default', 'catppuccin', 'geist-contrast'],
-                [False, True], ['other', 'parent'], ['compact', 'detailed'],
-                ['idle', 'unread', 'approval', 'clarify', 'running'],
-            ):
-                page.evaluate('a=>{document.querySelector("#fixture").style.width=a[0]+"px";setLocale(a[1]);'
-                              'document.documentElement.dataset.skin=a[2];document.documentElement.classList.toggle("dark",a[3]);'
-                              'referenceScene(a[6],a[5],a[4])}', [width, locale, skin, dark, selected, density, state])
-                data = page.evaluate('referenceGeometry()')
+            # Run each matrix inside the page in chunks. One Python<->browser
+            # round trip per case made this script take ~87s against the 90s
+            # harness timeout; referenceGeometry() measures synchronously
+            # (getBoundingClientRect forces layout), so batching changes no
+            # geometry. Cases keep their order and the same state carry-over
+            # (skin/dark/font are only touched where the original loop set
+            # them); screenshot scenes are replayed after each batch.
+            page.evaluate("""() => { window.__referenceBatch = cases => cases.map(a => {
+              const root=document.documentElement;
+              document.querySelector('#fixture').style.width=a.width+'px';
+              setLocale(a.locale);
+              if(a.font) root.style.setProperty('--font-ui', a.font+',sans-serif');
+              if(a.skin) root.dataset.skin=a.skin;
+              if(a.dark!==null) root.classList.toggle('dark', a.dark);
+              if(a.selected) referenceScene(a.state, a.density, a.selected); else referenceScene(a.state, a.density);
+              return referenceGeometry();
+            }); }""")
+
+            def run_batch(cases):
+                out = []
+                for i in range(0, len(cases), 800):
+                    out.extend(page.evaluate('cases => window.__referenceBatch(cases)', cases[i:i + 800]))
+                return out
+
+            def case(width, locale, density, state, skin=None, dark=None, selected=None, font=None):
+                return dict(width=width, locale=locale, density=density, state=state,
+                            skin=skin, dark=dark, selected=selected, font=font)
+
+            cases = [case(width, locale, density, state)
+                     for width in [180, 300, 360] for locale in locales
+                     for density in ['compact', 'detailed']
+                     for state in ['idle', 'unread', 'approval', 'clarify', 'running']]
+            for a, data in zip(cases, run_batch(cases)):
+                width, locale = a['width'], a['locale']
+                failures = []
+                if not data['markVisible'] or not data['glyphsFit']:
+                    failures.append('status mark or primary title recognition lost')
+                if data['label'] != data['short'] or data['full'] not in data['aria'] or data['aria'] != data['tooltip']:
+                    failures.append('child-qualified archived explanation lost')
+                if width >= 300 and not data['labelReadable']:
+                    failures.append('child-qualified label clipped at normal width')
+                if data['role'] != 'img':
+                    failures.append('reference-only chip became an expander')
+                results.append(dict(viewport=viewport, width=width, locale=locale, density=a['density'],
+                                    state=a['state'], data=data, failures=failures))
+            page.evaluate('() => window.__referenceBatch([{width:300,locale:"de",density:"compact",state:"approval",'
+                          'skin:null,dark:null,selected:null,font:null}])')
+            page.screenshot(path=str(args.output / f'{viewport}-de-300-dark.png'))
+            page.evaluate('document.documentElement.classList.remove("dark")')
+            page.wait_for_timeout(180)
+            page.screenshot(path=str(args.output / f'{viewport}-de-300-light.png'))
+            page.evaluate('document.documentElement.classList.add("dark")')
+
+            cases = [case(width, locale, density, state, skin=skin, dark=dark, selected=selected)
+                     for width, locale, skin, dark, selected, density, state in product(
+                         [180, 220, 240], locales, ['graphite', 'default', 'catppuccin', 'geist-contrast'],
+                         [False, True], ['other', 'parent'], ['compact', 'detailed'],
+                         ['idle', 'unread', 'approval', 'clarify', 'running'],
+                     )]
+            for a, data in zip(cases, run_batch(cases)):
                 failures = []
                 if not data['markVisible'] or not data['glyphsFit']:
                     failures.append('status mark or primary title recognition lost')
                 if data['role'] != 'img' or data['label'] != data['short'] or data['full'] not in data['aria']:
                     failures.append('reference-only child semantics lost')
-                results.append(dict(viewport=viewport, width=width, locale=locale, skin=skin, dark=dark,
-                                    selected=selected, density=density, state=state, data=data, failures=failures))
-                if width == 180 and locale == 'de' and skin == 'graphite' and selected == 'other' and density == 'compact' and state == 'approval':
-                    page.screenshot(path=str(args.output / f'{viewport}-de-180-{dark}.png'))
+                results.append(dict(viewport=viewport, width=a['width'], locale=a['locale'], skin=a['skin'], dark=a['dark'],
+                                    selected=a['selected'], density=a['density'], state=a['state'], data=data, failures=failures))
+            for dark in [False, True]:
+                run_batch([case(180, 'de', 'compact', 'approval', skin='graphite', dark=dark, selected='other')])
+                page.screenshot(path=str(args.output / f'{viewport}-de-180-{dark}.png'))
+            # The original loop ended on its last case; restore that state
+            # before the font matrix, which inherits skin/dark from it.
+            run_batch([cases[-1]])
+
             # Exercise wider system-font metrics independently of the host's
             # preferred UI font, especially around the narrow-content breakpoint.
-            for width, font, skin, selected, density, state in product(
-                [220, 240, 300], ['Arial', 'DejaVu Sans'], ['default', 'catppuccin'],
-                ['other', 'parent'], ['compact', 'detailed'], ['idle', 'unread', 'approval'],
-            ):
-                page.evaluate('a=>{document.querySelector("#fixture").style.width=a[0]+"px";setLocale("de");'
-                              'document.documentElement.style.setProperty("--font-ui",a[1]+",sans-serif");'
-                              'document.documentElement.dataset.skin=a[2];'
-                              'referenceScene(a[5],a[4],a[3])}', [width, font, skin, selected, density, state])
-                data = page.evaluate('referenceGeometry()')
+            cases = [case(width, 'de', density, state, skin=skin, selected=selected, font=font)
+                     for width, font, skin, selected, density, state in product(
+                         [220, 240, 300], ['Arial', 'DejaVu Sans'], ['default', 'catppuccin'],
+                         ['other', 'parent'], ['compact', 'detailed'], ['idle', 'unread', 'approval'],
+                     )]
+            for a, data in zip(cases, run_batch(cases)):
                 failures = []
                 if not data['markVisible'] or not data['glyphsFit']:
                     failures.append('status mark or primary title recognition lost')
-                if width >= 300 and not data['labelReadable']:
+                if a['width'] >= 300 and not data['labelReadable']:
                     failures.append('child-qualified label clipped at normal width')
-                results.append(dict(viewport=viewport, width=width, font=font, skin=skin,
-                                    selected=selected, density=density, state=state, data=data, failures=failures))
-                if width == 220 and font == 'DejaVu Sans' and skin == 'default' and selected == 'other' and density == 'compact' and state == 'idle':
-                    page.screenshot(path=str(args.output / f'{viewport}-de-220-system-font.png'))
+                results.append(dict(viewport=viewport, width=a['width'], font=a['font'], skin=a['skin'],
+                                    selected=a['selected'], density=a['density'], state=a['state'], data=data, failures=failures))
+            run_batch([case(220, 'de', 'compact', 'idle', skin='default', selected='other', font='DejaVu Sans')])
+            page.screenshot(path=str(args.output / f'{viewport}-de-220-system-font.png'))
+            run_batch([cases[-1]])
             page.evaluate('document.documentElement.style.removeProperty("--font-ui");setLocale("de");document.documentElement.dataset.skin="graphite";document.documentElement.classList.add("dark")')
             for width in [180, 300]:
                 page.locator('#fixture').evaluate('(e,w)=>e.style.width=w+"px"', width)
