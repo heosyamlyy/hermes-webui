@@ -2276,13 +2276,13 @@
        lines (reviewer re-gate 2026-10-07T18:08:02Z). Expanded it grows in
        place and the scroller shrinks; the phone layout only tightens padding. */
     .chat-todos{flex:0 0 auto;width:100%;background:var(--surface);border-bottom:1px solid var(--border);}
-    .chat-todos-head{display:flex;align-items:center;gap:8px;width:100%;min-height:35px;padding:0 12px;background:transparent;border:none;cursor:pointer;color:var(--text);font-size:13px;font-weight:600;text-align:left;transition:background .12s;}
+    .chat-todos-head{display:flex;align-items:center;gap:8px;width:100%;min-height:35px;padding:0 24px;background:transparent;border:none;cursor:pointer;color:var(--text);font-size:13px;font-weight:600;text-align:left;transition:background .12s;}
     .chat-todos-head:hover{background:var(--hover-bg);}
     .chat-todos-title{display:inline-flex;align-items:center;gap:7px;min-width:0;flex:1;}
     .chat-todos-title svg{flex-shrink:0;color:var(--accent);}
     .chat-todos-chevron{flex-shrink:0;display:inline-flex;align-items:center;color:var(--muted);transition:transform .18s ease;}
     .chat-todos.open .chat-todos-chevron{transform:rotate(180deg);}
-    .chat-todos-body{max-height:240px;overflow-y:auto;border-top:1px solid var(--border);padding:4px 0 8px;}
+    .chat-todos-body{max-height:min(240px,40vh);overflow-y:auto;border-top:1px solid var(--border);padding:4px 0 8px;}
     .chat-todos:not(.open) .chat-todos-body{display:none;}
     /* The rows come from the ONE shared row renderer (renderTodoRow), so the tray
        owns no row styling any more — it only centres that renderer on the
@@ -2302,7 +2302,7 @@
        scroll away) and appears only while content remains below the fold
        (re-gate 2026-10-08T03:10:50Z). */
     .chat-todos-body-wrap{position:relative;}
-    .chat-todos-scroll-cue{position:absolute;left:0;right:0;bottom:0;height:22px;pointer-events:none;opacity:0;transition:opacity .15s ease;background:linear-gradient(to bottom,rgba(0,0,0,0),var(--surface));}
+    .chat-todos-scroll-cue{position:absolute;left:0;right:0;bottom:0;height:40px;pointer-events:none;opacity:0;transition:opacity .15s ease;background:linear-gradient(to bottom,rgba(0,0,0,0),var(--surface));}
     .chat-todos:not(.open) .chat-todos-scroll-cue{display:none;}
     .chat-todos-body-wrap.chat-todos-overflowing .chat-todos-scroll-cue{opacity:1;}
     /* The floating Start jump pill is anchored to the shell's top-right; when
@@ -2313,9 +2313,14 @@
        2026-10-07T20:13:25Z, [SHOULD-FIX] 2). */
     .messages-shell.chat-todos-visible #jumpToSessionStartBtn{top:calc(var(--chat-todos-h,36px) + 7px);}
     @media(prefers-reduced-motion:reduce){.chat-todos-head{transition:none;}.chat-todos-chevron{transition:none;}.chat-todos-scroll-cue{transition:none;}}
+    /* The header takes the rows' 24px inset so its icon lines up with the row /
+       transcript columns; below 640px both fall to the 10px safe-area mirror
+       (see the <=640px block further down), which is why the narrow header rule
+       lives there and not here (re-gate 2026-10-08T08:44:28Z, item 1). The body
+       cap also gets a height term so a short / landscape phone viewport cannot
+       let the expanded tray swallow the transcript (item 3). */
     @media(max-width:768px){
-      .chat-todos-head{padding:0 10px;}
-      .chat-todos-body{max-height:200px;}
+      .chat-todos-body{max-height:min(200px,40vh);}
     }
   .messages{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;min-height:0;position:relative;z-index:0;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior-y:none;overflow-anchor:auto;}
 @media (hover:hover) and (pointer:fine){.messages{overflow-anchor:none;}}
@@ -3201,6 +3206,10 @@
        2026-10-08T03:10:50Z). Kept in THIS block — not a second @media — so the
        mobile containment rules asserted for .messages-inner stay together. */
     .chat-todos-rows{max-width:100%;padding-left:max(10px,env(safe-area-inset-left,0));padding-right:max(10px,env(safe-area-inset-right,0));}
+    /* ...and the tray header follows that same 10px mirror, so the header icon
+       keeps sitting on the row column at phone widths (re-gate
+       2026-10-08T08:44:28Z, item 1). */
+    .chat-todos-head{padding:0 10px;}
     .msg-body{padding-left:0;max-width:100%;}
     .msg-role{font-size:12px;}
     .composer-wrap{padding:8px 10px calc(12px + var(--keyboard-bottom-inset, 0px))!important;padding-left:max(10px,env(safe-area-inset-left,0))!important;padding-right:max(10px,env(safe-area-inset-right,0))!important;}

@@ -330,9 +330,11 @@ def test_chat_todos_desktop_tray_is_an_in_flow_strip():
     assert (
         ".chat-todos-head{display:flex;align-items:center;gap:8px;width:100%;min-height:35px;" in css
     )
-    # Expanded, the body grows in place inside the same flex item.
+    # Expanded, the body grows in place inside the same flex item, capped by a
+    # width AND a height term so a short / landscape viewport cannot let the tray
+    # swallow the transcript (reviewer re-gate 2026-10-08T08:44:28Z, ask 3).
     assert (
-        ".chat-todos-body{max-height:240px;overflow-y:auto;border-top:1px solid var(--border);" in css
+        ".chat-todos-body{max-height:min(240px,40vh);overflow-y:auto;border-top:1px solid var(--border);" in css
     )
     # The floating Start jump pill is anchored to the shell's top-right, so it
     # must drop below the strip instead of painting over it — by the strip's
@@ -990,7 +992,7 @@ def test_chat_todos_rows_are_centred_on_the_reading_column():
     assert ".messages-inner { max-width: var(--msg-max); }" in css
     # The body's own horizontal padding is gone, so the rows' containing block is
     # the same box .messages-inner lives in — that is what makes them agree.
-    assert ".chat-todos-body{max-height:240px;overflow-y:auto;border-top:1px solid var(--border);padding:4px 0 8px;}" in css
+    assert ".chat-todos-body{max-height:min(240px,40vh);overflow-y:auto;border-top:1px solid var(--border);padding:4px 0 8px;}" in css
     assert 'body.innerHTML=`<div class="chat-todos-rows">' in ui
 
 
@@ -1008,7 +1010,7 @@ def test_chat_todos_capped_body_has_an_overflow_cue():
     # Collapsed bodies render nothing, so the cue must not paint there either.
     assert ".chat-todos:not(.open) .chat-todos-scroll-cue{display:none;}" in css
     # The capped (mobile) body is still what the cue exists for.
-    assert ".chat-todos-body{max-height:200px;}" in css
+    assert ".chat-todos-body{max-height:min(200px,40vh);}" in css
     assert "function _wireChatTodosScrollCue(){" in ui
     assert "body.addEventListener('scroll',_updateChatTodosScrollCue,{passive:true})" in ui
     assert "_updateChatTodosScrollCue();" in ui
@@ -1146,5 +1148,96 @@ def test_chat_todos_shared_row_renderer_serves_the_tray():
     workspace = _read_static("static/workspace.js")
     assert "renderTodoRows(todos, {metadata:true})" in panels
     assert "renderTodoRows(todos, {metadata:true})" in workspace
+
+
+# ── Round-4 polish (reviewer re-gate 2026-10-08T08:44:28Z) ─────────────────
+# The maintainer re-shot the tray in a realistic layout and asked for four
+# one/two-line fixes before it goes to Nathan for visual sign-off.
+
+
+def test_chat_todos_header_takes_the_rows_inset_down_to_640px():
+    """Ask 1: "Give the header the rows' inset and move the narrow-header rule
+    from 768px to 640px." The header used a 12px inset while the rows and the
+    transcript use 24px, so the header icon sat 12px left of the status-icon
+    column (14px between 641 and 768px)."""
+    css = _read_static("static/style.css")
+    assert (
+        ".chat-todos-head{display:flex;align-items:center;gap:8px;width:100%;"
+        "min-height:35px;padding:0 24px;" in css
+    )
+    # Exactly ONE narrow rule, and it sits in the SAME <=640px block as the rows'
+    # 10px safe-area mirror (proved by "no @media between them"), right after it.
+    assert css.count(".chat-todos-head{padding:0 10px;}") == 1
+    rows_mobile = css.index(".chat-todos-rows{max-width:100%;")
+    head_mobile = css.index(".chat-todos-head{padding:0 10px;}")
+    assert rows_mobile < head_mobile
+    assert "@media(" not in css[rows_mobile:head_mobile]
+    # The 768px block kept only the body cap.
+    at768 = css.index("@media(max-width:768px){")
+    end768 = css.index(".messages{flex:1;overflow-y:auto;", at768)
+    assert ".chat-todos-head" not in css[at768:end768]
+    assert ".chat-todos-body{max-height:min(200px,40vh);}" in css[at768:end768]
+
+
+def test_chat_todos_body_cap_carries_a_height_term():
+    """Ask 3: "Cap by height too." The cap depended only on width, so a phone in
+    landscape (844x390) got the 240px cap and the expanded tray took ~70% of the
+    height, collapsing the transcript to nothing."""
+    css = _read_static("static/style.css")
+    assert ".chat-todos-body{max-height:min(240px,40vh);" in css
+    assert ".chat-todos-body{max-height:min(200px,40vh);}" in css
+    # The width-only caps are gone.
+    assert ".chat-todos-body{max-height:240px;" not in css
+    assert ".chat-todos-body{max-height:200px;}" not in css
+
+
+def test_chat_todos_overflow_cue_is_strong_enough():
+    """Ask 2: the 22px fade landed on a cancelled row that is already
+    half-opacity and struck through, so it read as row styling; ~40px."""
+    css = _read_static("static/style.css")
+    assert (
+        ".chat-todos-scroll-cue{position:absolute;left:0;right:0;bottom:0;height:40px;" in css
+    )
+    assert "height:22px;pointer-events:none" not in css
+
+
+# The exact tail sentence the disabled workspace-todos card carried in each
+# locale before the re-gate; ask 4 dropped it everywhere.
+_REMOVED_TODOS_DESC_TAILS = (
+    "The sidebar Todos panel remains available",  # en
+    "Il pannello Todos della barra laterale rimane disponibile",  # it
+    "サイドバーのTodosパネルは引き続き利用できます",  # ja
+    "Боковая панель Todos остаётся доступной",  # ru
+    "El panel Todos de la barra lateral sigue disponible",  # es
+    "Das Todos-Panel in der Seitenleiste bleibt weiterhin verfügbar",  # de
+    "侧边栏的待办事项面板仍然可用",  # zh-CN
+    "側邊欄的待辦事項面板仍然可用",  # zh-TW
+    "O painel Todos da barra lateral continua disponível",  # pt
+    "사이드바 Todos 패널은 계속 사용할 수 있습니다",  # ko
+    "Le panneau Todos de la barre latérale reste disponible",  # fr
+    "Panel Úkoly v bočním panelu zůstává dostupný",  # cs
+    "Kenar çubuğu Todos paneli kullanılabilir olmaya devam eder",  # tr
+    "Panel Todos na pasku bocznym pozostaje dostępny",  # pl
+    "Panel Todos ở sidebar vẫn có sẵn",  # vi
+)
+
+
+def test_workspace_todos_desc_drops_the_contradictory_sidebar_sentence():
+    """Ask 4: the disabled "Show Todos tab in workspace panel" card still claimed
+    the sidebar Todos panel "remains available regardless", directly under a card
+    that says it is hidden. The sentence is gone in EVERY locale, not just
+    English."""
+    i18n = _read_static("static/i18n.js")
+    idx = _read_static("static/index.html")
+    for tail in _REMOVED_TODOS_DESC_TAILS:
+        assert tail not in i18n, f"locale tail still present: {tail!r}"
+    # The HTML fallback text (pre-i18n first paint) drops it too.
+    assert "remains available regardless" not in idx
+    # ...while the key itself survives in all 15 locales that carried it.
+    assert i18n.count("settings_desc_workspace_todos_tab") == 15
+    assert (
+        "settings_desc_workspace_todos_tab: 'When enabled, a Todos tab appears in the workspace panel.',"
+        in i18n
+    )
 
 
