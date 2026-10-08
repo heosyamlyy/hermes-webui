@@ -10504,25 +10504,68 @@ function _syncChatTodosRailVisibility(){
 // The tray is an in-flow strip, so the shell carries a marker class while it is
 // visible. CSS uses it to drop the floating Start jump pill below the strip
 // instead of letting it paint over the tray (reviewer re-gate 2026-10-07T18:08:02Z).
+let _chatTodosResizeObserver=null;
+function _publishChatTodosHeight(){
+  // Measure the tray's ACTUAL box and publish it on the shell: CSS offsets the
+  // Start jump pill by it instead of the fixed 43px that only cleared the
+  // collapsed band and let the pill paint inside the expanded rows
+  // (re-gate 2026-10-07T20:13:25Z, [SHOULD-FIX] 2).
+  //
+  // Guarded on purpose: a hidden tray measures 0 and must never clobber a real
+  // height with 0. The observer below republishes as soon as the box is real
+  // again, so the guard no longer strands a stale value (re-gate
+  // 2026-10-07T23:49:23Z).
+  if(typeof document==='undefined'||!document.querySelector) return 0;
+  const shell=document.querySelector('.messages-shell');
+  if(!shell||!shell.style) return 0;
+  const tray=(typeof $==='function')?$('chatTodosPanel'):null;
+  let h=0;
+  try{ h=(tray&&tray.getBoundingClientRect)?tray.getBoundingClientRect().height:0; }catch(_){ h=0; }
+  h=Math.round(h);
+  if(h>0&&shell.style.setProperty) shell.style.setProperty('--chat-todos-h',h+'px');
+  return h;
+}
 function _syncChatTodosShellClass(visible){
   if(typeof document==='undefined'||!document.querySelector) return;
   const shell=document.querySelector('.messages-shell');
   if(shell&&shell.classList){
     shell.classList.toggle('chat-todos-visible',!!visible);
-    // The strip's height changes with expansion and with the task count, so
-    // publish the LIVE height on the shell: CSS offsets the Start jump pill by
-    // it instead of the fixed 43px that only cleared the collapsed band and let
-    // the pill paint inside the expanded rows (re-gate 2026-10-07T20:13:25Z,
-    // [SHOULD-FIX] 2).
     if(!visible){
       if(shell.style&&shell.style.removeProperty) shell.style.removeProperty('--chat-todos-h');
       return;
     }
-    const tray=(typeof $==='function')?$('chatTodosPanel'):null;
-    let h=0;
-    try{ h=(tray&&tray.getBoundingClientRect)?tray.getBoundingClientRect().height:0; }catch(_){ h=0; }
-    if(h>0&&shell.style&&shell.style.setProperty) shell.style.setProperty('--chat-todos-h',Math.round(h)+'px');
+    _publishChatTodosHeight();
   }
+}
+function _ensureChatTodosResizeObserver(){
+  // Lifecycle-owned tray observer. The strip's box changes on schedules that
+  // never call renderChatTodos()/toggleChatTodos(): resizing ACROSS the tray
+  // breakpoint (the strip grows 236px -> 276px at 393 -> 1440) and a hidden
+  // tray becoming visible again after Settings edits hydrate the list while
+  // chat is hidden (0 -> 276px, which kept the stale 77px and painted the
+  // whole Start pill inside the task rows). Observing the real box covers both,
+  // so the pill follows the tray's actual box instead of the last render's
+  // measurement (re-gate 2026-10-07T23:49:23Z).
+  if(typeof ResizeObserver!=='function') return;
+  if(typeof document==='undefined'||!document.querySelector) return;
+  const tray=(typeof $==='function')?$('chatTodosPanel'):null;
+  if(!tray) return;
+  if(_chatTodosResizeObserver&&_chatTodosResizeObserver._tray===tray) return;
+  if(_chatTodosResizeObserver&&_chatTodosResizeObserver.disconnect) _chatTodosResizeObserver.disconnect();
+  _chatTodosResizeObserver=null;
+  try{
+    const ro=new ResizeObserver(function(){
+      // Only a visible strip owns the pill offset: while chat is hidden the box
+      // measures 0 and publishing that would leave the pill un-offset. The
+      // hidden -> visible flip re-fires this observer with the real box.
+      const shell=document.querySelector('.messages-shell');
+      if(!(shell&&shell.classList&&shell.classList.contains('chat-todos-visible'))) return;
+      if(_publishChatTodosHeight()>0) _repinChatTodosTranscript();
+    });
+    ro._tray=tray;
+    ro.observe(tray);
+    _chatTodosResizeObserver=ro;
+  }catch(_){ _chatTodosResizeObserver=null; }
 }
 function _syncChatTodosExpanded(open){
   const tray=$('chatTodosPanel');
@@ -10592,6 +10635,9 @@ function renderChatTodos(){
   if(typeof $!=='function'||typeof document==='undefined') return;
   const tray=$('chatTodosPanel');
   if(!tray) return;
+  // Keep the lifecycle-owned box observer alive across every path that can
+  // (re)create or re-show the tray (re-gate 2026-10-07T23:49:23Z).
+  _ensureChatTodosResizeObserver();
   if(!chatTodosEnabled()){
     tray.hidden=true;
     _syncChatTodosShellClass(false);

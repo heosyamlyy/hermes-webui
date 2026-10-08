@@ -328,7 +328,9 @@ def test_chat_todos_desktop_tray_is_an_in_flow_strip():
     ui = _read_static("static/ui.js")
     assert "function _syncChatTodosShellClass(visible){" in ui
     assert "shell.classList.toggle('chat-todos-visible',!!visible)" in ui
-    assert "shell.style.setProperty('--chat-todos-h',Math.round(h)+'px')" in ui
+    # The measurement is factored out so the observer below can republish it.
+    assert "function _publishChatTodosHeight(){" in ui
+    assert "shell.style.setProperty('--chat-todos-h',h+'px')" in ui
     # The in-flow strip resizes the transcript, so every layout-changing path
     # also re-pins the reader (re-gate 2026-10-07T20:13:25Z, [SILENT]).
     assert "function _repinChatTodosTranscript(){" in ui
@@ -720,3 +722,109 @@ def test_apply_locale_repaint_probe(tmp_path):
     )
     script = _LOCALE_SUMMARY_PROBE.replace("__HELPER__", helper)
     assert _run_node(tmp_path, "locale_summary_probe.js", script).strip() == "ok"
+
+
+# ── Tray box lifecycle: the pill must follow the ACTUAL box ───────────────
+# Re-gate 2026-10-07T23:49:23Z: "make pill placement follow the tray's actual
+# box through those two schedules" — (1) resizing ACROSS the tray breakpoint and
+# (2) a hidden tray becoming visible after Settings edits hydrate the list. Both
+# bypass renderChatTodos()/toggleChatTodos(), where the height used to be
+# measured, so the published --chat-todos-h stranded a stale value (236px while
+# the strip was 276px; 77px while it was 276px) and the Start pill painted inside
+# the task rows. These probes run the shipped functions under node and drive
+# both schedules through the observer, instead of asserting on source text.
+
+_TRAY_HEIGHT_PROBE = """
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+const shellClasses = new Set();
+const shellStyle = {
+  _v: {},
+  setProperty(k, v) { this._v[k] = v; },
+  removeProperty(k) { delete this._v[k]; },
+  getPropertyValue(k) { return this._v[k] || ''; },
+};
+const shell = {
+  classList: {
+    add(c) { shellClasses.add(c); },
+    remove(c) { shellClasses.delete(c); },
+    contains(c) { return shellClasses.has(c); },
+    toggle(c, on) { if (on) shellClasses.add(c); else shellClasses.delete(c); return !!on; },
+  },
+  style: shellStyle,
+};
+// The strip's real box, mutable so the probe can drive the transitions.
+let boxHeight = 36;
+const tray = { getBoundingClientRect() { return { height: boxHeight }; } };
+function $(id) { return id === 'chatTodosPanel' ? tray : null; }
+const document = { querySelector(sel) { return sel === '.messages-shell' ? shell : null; } };
+const observers = [];
+class ResizeObserver {
+  constructor(cb) { this.cb = cb; this.el = null; observers.push(this); }
+  observe(el) { this.el = el; }
+  disconnect() { this.el = null; }
+}
+let repins = 0;
+function _repinMessagesAfterComposerResize() { repins++; }
+function fire() { observers.forEach(function (ro) { ro.cb([]); }); }
+__HELPER__
+
+// A. A render publishes the measured collapsed band.
+_syncChatTodosShellClass(true);
+assert(shellStyle.getPropertyValue('--chat-todos-h') === '36px', 'render publishes the measured strip height');
+
+// The observer is lifecycle-owned: set up once, for the tray element.
+_ensureChatTodosResizeObserver();
+_ensureChatTodosResizeObserver();
+assert(observers.length === 1, 'exactly one lifecycle observer, not one per render');
+assert(observers[0].el === tray, 'the observer watches the tray element');
+
+// B. Resize ACROSS the tray breakpoint (393 -> 1440) with no render/toggle call.
+// The strip grows, so the published height must follow the real box.
+boxHeight = 276;
+fire();
+assert(shellStyle.getPropertyValue('--chat-todos-h') === '276px',
+  'a breakpoint resize republishes the real box instead of stranding 236px');
+assert(repins >= 1, 'the observer schedule re-pins the transcript');
+
+// C. Hidden -> visible. While chat is hidden the strip measures 0.
+boxHeight = 0;
+const hiddenPublished = shellStyle.getPropertyValue('--chat-todos-h');
+const repinsWhileHidden = repins;
+fire();
+assert(shellStyle.getPropertyValue('--chat-todos-h') === hiddenPublished,
+  'a hidden (0px) box must not clobber the published height with 0');
+assert(repins === repinsWhileHidden, 'a hidden box does not re-pin');
+// Returning to chat re-fires the observer with the real box.
+boxHeight = 276;
+fire();
+assert(shellStyle.getPropertyValue('--chat-todos-h') === '276px',
+  'hidden -> visible publishes the visible height, not the stale 77px');
+assert(repins > repinsWhileHidden, 'hidden -> visible re-pins the transcript too');
+
+// D. Turning the tray off clears the offset and the shell marker class.
+_syncChatTodosShellClass(false);
+assert(shellStyle.getPropertyValue('--chat-todos-h') === '', 'tray off clears the published height');
+assert(!shell.classList.contains('chat-todos-visible'), 'tray off drops the shell marker class');
+console.log('ok');
+"""
+
+
+def test_chat_todos_pill_follows_the_tray_box_lifecycle(tmp_path):
+    ui = _read_static("static/ui.js")
+    helper = _extract(
+        ui, "let _chatTodosResizeObserver=null;", "function _syncChatTodosExpanded("
+    ) + _extract(
+        ui, "function _repinChatTodosTranscript(){", "function renderChatTodos(){"
+    )
+    script = _TRAY_HEIGHT_PROBE.replace("__HELPER__", helper)
+    assert _run_node(tmp_path, "tray_height_probe.js", script).strip() == "ok"
+
+
+def test_chat_todos_box_observer_is_wired_into_the_render_path():
+    """Source guard for the probe above: every render (re)arms the observer."""
+    ui = _read_static("static/ui.js")
+    render = _extract(ui, "function renderChatTodos(){", "function toggleChatTodos(){")
+    assert "_ensureChatTodosResizeObserver();" in render
+    assert "new ResizeObserver(" in ui
+    assert "ro.observe(tray);" in ui
+
