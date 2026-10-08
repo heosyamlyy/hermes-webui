@@ -74,7 +74,11 @@ function _formatRelativeSessionTime(){return '1m';}
 function _sessionSearchContentPreview(){return '';}
 function _nestedChildTitle(s){return s.title;}
 function _buildSessionRenameStarter(){return ()=>{};}
-function _makeSessionSwipeAffordance(){return document.createElement('span');}
+function _makeSessionSwipeAffordance(direction){
+  const el=document.createElement('span');
+  el.className='session-swipe-affordance session-swipe-affordance-'+direction;
+  return el;
+}
 async function _openSidebarSession(s, options){opened.push({sid:s.session_id,options});}
 function _getChannelLabel(){return '';}
 function renderSessionListFromCache(){if(typeof repaint==='function')repaint();}

@@ -304,7 +304,12 @@ status mark remain visible. Running and unread retain a plain status mark; concu
 completion remains in the chip tooltip and accessible name when running or
 attention takes visual precedence. A reference-only chip uses a localized
 short child-qualified archived label, keeps the full archived explanation in its tooltip and
-accessible name, and is not an expander.
+accessible name, and is not an expander. Clickable child counts reserve the initial
+numeral plus an ellipsis independently of the status and concurrent-activity
+marks. Secondary wording yields space before the primary title; both marks stay
+inside the chip, including selected skins and Detailed density. At the narrowest
+width, fork/worktree/project badges can still reduce the title to its existing
+24px floor; reference-only archived labels keep their separate width budget.
 Fork and delegated row indicators are both 14px; delegated navigation targets
 are at least 44px tall on narrow layouts or coarse pointers, while fine-pointer
 desktop rows remain compact.

@@ -5727,8 +5727,14 @@ main.main > #mainPlugin{display:none;}
 .session-child-count:hover{background:rgba(99,179,237,.26);color:#90cdf4;}
 .session-child-count{gap:3px;padding:0 5px;flex-shrink:1;min-width:23px;max-width:60%;box-sizing:border-box;}
 .session-child-count:not([role="button"]){cursor:default;}
-/* Navigation keeps the primary title ahead of the secondary count. */
-.session-child-count[role="button"]{max-width:50%;}
+/* Give the title spare space before secondary wording. Keep the numeral and
+   its ellipsis, and budget concurrent marks at the same scale as the status.
+   The 15/26px floors are 4px padding + 10px per mark + 1px per internal gap. */
+.session-child-count[role="button"]{max-width:50%;gap:1px;padding:0 2px;min-width:calc(1ch + 1em + 15px);}
+.session-child-count[role="button"]:has(.session-child-activity-indicator){min-width:calc(1ch + 1em + 26px);}
+.session-child-count[role="button"] .session-child-count-label{min-width:calc(1ch + 1em);}
+.session-child-count[role="button"] .session-child-activity-indicator{width:10px;height:10px;}
+.session-title-row:has(.session-child-count[role="button"]) .session-title{flex-basis:auto;}
 .session-child-count-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .session-child-count:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
 .session-child-count-state{width:10px;height:10px;}
