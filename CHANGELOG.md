@@ -127,6 +127,13 @@
 
 ### Fixed
 
+- **A conversation's sidebar row shows its own state, not its sub-conversations'.** On master a parent conversation was
+  painted with a delegated child's "needs approval" or "running" state, so the sidebar said the parent needed you when it
+  was really one of its children. The parent row now shows only its own state, and its children's states move to a compact
+  chip on the row ("2 children", red when one is waiting for approval, with the details in its tooltip and screen-reader
+  label); expanded child rows carry their own indicators. The chip keeps room for the title at narrow sidebar widths, and
+  child rows are 44px touch targets on phones. Thanks @snoyberg. (#7976)
+
 - **Conversations no longer freeze after compression or an edit and silently hide every later turn.** A turn that
   committed without a timestamped user message (a Gateway handoff or a background-process notification) stamped the
   conversation's replay cutoff with the current clock time, newer than everything already saved. From then on the
