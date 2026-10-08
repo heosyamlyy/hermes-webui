@@ -9161,12 +9161,6 @@ function renderSessionListFromCache(){
       if(!childCount&&!hasChildState) titleRow.appendChild(segmentCountEl);
     }
     const childrenExpanded=childCount>0&&Array.isArray(s._child_sessions)&&(_expandedChildSessionKeys.has(lineageKey)||!!searchQueryRaw);
-    // The chip already shows running activity unless attention occupies its mark.
-    // Supplement attention without replacing the parent's own notification.
-    if(childAttention&&childState.isStreaming&&!childrenExpanded&&!ownStreaming){
-      titleRow.appendChild(_createChildSessionStateIndicator(
-        {isStreaming:true},'session-child-activity-indicator'));
-    }
     // Reference-only archived children contribute state without becoming navigable rows.
     if(childCount>0||hasChildState){
       const childCountEl=document.createElement('span');
@@ -9185,6 +9179,11 @@ function renderSessionListFromCache(){
         const concurrentRunning=childAttention&&childState.isStreaming?` · ${t('session_child_running')}`:'';
         const concurrentUnread=childState.hasUnread&&(childAttention||childState.isStreaming)?` · ${t('session_child_unread')}`:'';
         childCountEl.title=`${state.title}${concurrentRunning}${concurrentUnread} · ${childBadgeTip}`;
+        // Both marks belong to the child aggregate, never to the parent's dot.
+        if(childAttention&&childState.isStreaming&&!childrenExpanded){
+          childCountEl.appendChild(_createChildSessionStateIndicator(
+            {isStreaming:true},'session-child-activity-indicator'));
+        }
       }
       ['pointerdown','pointerup','click'].forEach(ev=>childCountEl.addEventListener(ev,e=>e.stopPropagation()));
       if(childCount>0){

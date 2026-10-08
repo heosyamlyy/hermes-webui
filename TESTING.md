@@ -69,6 +69,13 @@ default, light/dark, desktop/tablet/phone. It saves before/after screenshots usi
 `--before-ref <commit>`. The concurrent-state gate also exercises actual touch
 chip expansion at the minimum width: focus must not retarget its synthetic click.
 
+`python tests/browser_child_chip_ownership.py --output <artifact-directory>`
+checks concurrent child activity is contained in the chip, independently of the
+parent's own unread/approval dot. At 180/220/240/300px across every locale it
+measures five actual title glyphs plus ellipsis, the count's first glyph and both
+status marks, then exercises keyboard/touch disclosure and child navigation.
+Use `--before-ref <commit>` for red-before evidence and screenshots.
+
 `python tests/browser_child_title_spacing.py --output <artifact-directory>`
 checks fork/worktree/project badge combinations at 180–240px and compares
 childless Detailed-density compressed rows with the production renderer/CSS at

@@ -128,6 +128,25 @@ def test_mixed_children_priority_and_parent_independence(own, states, priority):
     assert out["unchanged"]
 
 
+@pytest.mark.parametrize("own", ["idle", "unread", "streaming", "approval", "clarify"])
+@pytest.mark.parametrize("expanded", [False, True])
+def test_concurrent_child_activity_is_owned_by_chip(own, expanded):
+    parent = session("parent", own)
+    children = [session("approval", "approval", parent_session_id="parent", relationship_type="child_session"),
+                session("running", "streaming", parent_session_id="parent", relationship_type="child_session")]
+    raw = [parent, *children]
+    out = run_component(raw, raw, expanded, "other")
+    activity = out["activity"]
+    assert len(activity) == int(not expanded)
+    if activity:
+        assert activity[0] in out["chip"]["children"], "Child activity must not sit beside the parent's dot"
+    marks = [c for c in out["chip"]["children"] if "session-child-count-state" in c["className"]]
+    assert len(marks) == 1 and "is-attention-approval" in marks[0]["className"]
+    assert "Child session is running" in out["chip"]["attributes"]["aria-label"]
+    for state in ["unread", "streaming", "approval", "clarify"]:
+        assert (expected_mark(state) in out["dot"]["className"].split()) == (own == state)
+
+
 def test_no_children_has_no_chip():
     parent = session("parent", "approval")
     out = run_component([parent], [parent], True, "other")

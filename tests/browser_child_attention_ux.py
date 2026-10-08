@@ -47,6 +47,7 @@ function measure(){
   const mark=chip.querySelector('.session-child-count-state'), r=mark.getBoundingClientRect();
   const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
   return {activity:root.querySelectorAll('.session-child-activity-indicator').length,
+    activityContained:[...root.querySelectorAll('.session-child-activity-indicator')].every(e=>chip.contains(e)),
     activityStates:[...root.querySelectorAll('.session-child-activity-indicator')].map(pseudo),
     chip:pseudo(mark),markClass:mark.className,aria:chip.getAttribute('aria-label'),expanded:chip.getAttribute('aria-expanded'),
     markVisible:!!hit&&(hit===mark||mark.contains(hit)),own:pseudo(root.querySelector(':scope > .session-attention-indicator')),
@@ -114,10 +115,10 @@ def main():
                                         data = page.evaluate('measure()')
                                         attention = state in ['approval', 'clarify', 'generic']
                                         expanded = stage in ['expanded', 'search']
-                                        expected_activity = int(attention and own != 'streaming' and not expanded)
+                                        expected_activity = int(attention and not expanded)
                                         failures = []
-                                        if data['activity'] != expected_activity:
-                                            failures.append('title activity must only supplement attention chip')
+                                        if data['activity'] != expected_activity or not data['activityContained']:
+                                            failures.append('concurrent child activity must belong to attention chip')
                                         if any(a['animation'] != 'spin' for a in data['activityStates']):
                                             failures.append('supplemental activity must be a CSS spinner')
                                         if not attention and data['chip']['animation'] != 'spin':

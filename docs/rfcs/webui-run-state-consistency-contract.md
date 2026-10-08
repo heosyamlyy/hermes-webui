@@ -275,9 +275,9 @@ own running, unread-completion, or approval/clarification state. Nested child
 sessions (including attached forks) must not light the parent's notification dot,
 hide its timestamp, or add unread/attention styling to it. Activity is distinct
 from notification: when children are collapsed and an attention mark occupies
-the child chip's slot, a separate title-row spinner exposes concurrent child
-work without replacing the parent's own unread or attention cue. Running-only
-children use the chip's spinner without a duplicate title-row spinner. Expanded
+the child chip's slot, a second spinner inside that chip exposes concurrent
+child work without implying parent activity or replacing the parent's own unread
+or attention cue. Running-only children use the chip's single spinner. Expanded
 children show activity on their own rows; the parent's own running spinner
 remains regardless of expansion. A
 reference-only archived child with no expandable rows is treated as collapsed.
