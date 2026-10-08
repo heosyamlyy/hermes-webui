@@ -1278,7 +1278,7 @@ def test_chat_todos_overflow_cue_is_strong_enough():
     half-opacity and struck through, so it read as row styling; ~40px."""
     css = _read_static("static/style.css")
     assert (
-        ".chat-todos-scroll-cue{position:absolute;left:0;right:0;bottom:0;height:40px;" in css
+        ".chat-todos-scroll-cue{position:absolute;left:0;right:0;bottom:0;height:min(40px,50%);" in css
     )
     assert "height:22px;pointer-events:none" not in css
 
