@@ -5773,8 +5773,8 @@ main.main > #mainPlugin{display:none;}
 .session-child-session-state{width:14px;height:14px;color:var(--accent);}
 @media (max-width:768px), (pointer:coarse){
   .session-child-session-delegated,.session-child-session-fork{min-height:44px;box-sizing:border-box;padding:8px 6px;}
-  .session-child-session-fork{padding:0 6px;}
-  .session-child-session-fork .session-child-session-main{min-height:44px;box-sizing:border-box;padding:8px 4px;}
+  .session-child-session-fork{padding:0 6px 0 0;}
+  .session-child-session-fork .session-child-session-main{min-height:44px;box-sizing:border-box;padding:8px 6px;}
 }
 .session-child-session-fork .session-actions-trigger{width:22px;height:22px;}
 .session-child-session-fork .session-swipe-affordance{top:1px;bottom:1px;}
