@@ -449,7 +449,10 @@
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                 </span>
               </button>
-              <div class="chat-todos-body" id="chatTodosBody"></div>
+              <div class="chat-todos-body-wrap" id="chatTodosBodyWrap">
+                <div class="chat-todos-body" id="chatTodosBody"></div>
+                <div class="chat-todos-scroll-cue" aria-hidden="true"></div>
+              </div>
             </div>
             <div class="messages" id="messages">
       <div class="empty-state" id="emptyState">
@@ -1039,13 +1042,6 @@
               </label>
               <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_workspace_panel_open">When enabled, the workspace / file browser panel opens automatically with each new session. You can still close it manually at any time.</div>
             </div>
-            <div class="settings-field" id="settingsWorkspaceTodosTabField">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                <input type="checkbox" id="settingsWorkspaceTodosTab" style="width:15px;height:15px;accent-color:var(--accent)">
-                <span data-i18n="settings_label_workspace_todos_tab">Show Todos tab in workspace panel</span>
-              </label>
-              <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_workspace_todos_tab">When enabled, a Todos tab appears in the workspace panel (right side). The sidebar Todos panel remains available regardless.</div>
-            </div>
             <div class="settings-field">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
                 <input type="checkbox" id="settingsSessionJumpButtons" style="width:15px;height:15px;accent-color:var(--accent)">
@@ -1060,12 +1056,25 @@
               </label>
               <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_session_endless_scroll">When enabled, older messages load automatically as you scroll upward. When disabled, use the older-messages button.</div>
             </div>
-            <div class="settings-field">
+            <div class="settings-field" style="margin-top:8px">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
                 <input type="checkbox" id="settingsChatTodosInChat" style="width:15px;height:15px;accent-color:var(--accent)">
                 <span data-i18n="settings_label_chat_todos_in_chat">Show task list in chat</span>
               </label>
               <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_chat_todos_in_chat">Show a collapsible task list at the top of the chat area. When enabled, the sidebar Todos panel is hidden to avoid duplication.</div>
+            </div>
+            <!-- The in-chat tray owns the task list while it is on, so this field
+                 stays in place next to the setting above but is DISABLED with an
+                 explanation instead of disappearing — a hidden field made the two
+                 settings silently contradict each other (reviewer re-gate
+                 2026-10-08T03:10:50Z). -->
+            <div class="settings-field" id="settingsWorkspaceTodosTabField">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="settingsWorkspaceTodosTab" style="width:15px;height:15px;accent-color:var(--accent)">
+                <span data-i18n="settings_label_workspace_todos_tab">Show Todos tab in workspace panel</span>
+              </label>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_workspace_todos_tab">When enabled, a Todos tab appears in the workspace panel (right side). The sidebar Todos panel remains available regardless.</div>
+              <div id="settingsWorkspaceTodosTabNote" hidden style="font-size:11px;color:var(--muted);margin-top:4px;font-style:italic" data-i18n="settings_note_workspace_todos_tab_disabled">Disabled while the task list in chat is on.</div>
             </div>
             <div class="settings-field" style="margin-top:8px">
               <label id="settingsChatActivityDisplayModeLabel" for="settingsChatActivityDisplayMode" data-i18n="settings_label_chat_activity_display_mode">Activity display</label>

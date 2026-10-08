@@ -79,13 +79,26 @@ def test_chat_todos_renderer_escapes_content_and_marks_terminal_states():
 
     # Guard against running in non-DOM contexts (node VM tests).
     assert "typeof $!=='function'" in render
-    # User content must be escaped; never interpolated raw.
-    assert "esc(content)" in render
-    # Terminal states get muted + strikethrough.
-    assert "line-through" in render
-    assert "status==='completed'||status==='cancelled'" in render
+    # The tray renders through the ONE shared row renderer instead of hand-rolling
+    # its own markup (reviewer re-gate 2026-10-08T03:10:50Z, "tidy the shared-row
+    # renderer"), so escaping + terminal-state styling live there now.
+    assert (
+        "renderTodoRows(todos,{metadata:false,compact:true,rowClass:'chat-todos-row'})" in render
+    )
+    shared = _extract_row_renderer(ui)
+    assert "esc(todoContent(td))" in shared
+    assert "line-through" in shared
+    assert "status==='completed'" in shared and "status==='cancelled'" in shared
     # Summary/counter derive from statuses, not from message text.
     assert "status!=='completed'" in ui and "status!=='cancelled'" in ui
+
+
+def _extract_row_renderer(ui: str) -> str:
+    """The shared renderTodoRow body (the one renderer all three surfaces use)."""
+    start = ui.find("function renderTodoRow(todo,options={}){")
+    end = ui.find("function renderTodoRows(", start)
+    assert start != -1 and end != -1
+    return ui[start:end]
 
 
 def test_rail_hide_helper_targets_todos_panel_and_bounces_to_chat():
@@ -196,10 +209,13 @@ def test_chat_todos_dead_force_hidden_and_progress_css_are_removed():
 
 def test_chat_todos_content_wraps_long_unbroken_tokens():
     css = _read_static("static/style.css")
-    assert (
-        ".chat-todos-row .todos-content{flex:1 1 auto;min-width:0;font-size:12.5px;"
-        "line-height:1.4;overflow-wrap:anywhere;}" in css
-    )
+    ui = _read_static("static/ui.js")
+    # Long unbroken tokens must not blow the row out. The wrap rule now lives in
+    # the shared row renderer, so every Todos surface (sidebar panel, workspace
+    # tab, in-chat tray) inherits it from one place.
+    shared = _extract_row_renderer(ui)
+    assert "overflow-wrap:anywhere" in shared
+    assert ".chat-todos-row .todos-content" not in css
     assert "@media(prefers-reduced-motion:reduce){.chat-todos-head{transition:none;}" in css
 
 
@@ -275,6 +291,9 @@ def test_chat_todos_i18n_keys_in_all_locales():
     expected = {
         "settings_label_chat_todos_in_chat",
         "settings_desc_chat_todos_in_chat",
+        # The tray-owned workspace-tab field keeps its visible-but-disabled note
+        # (reviewer re-gate 2026-10-08T03:10:50Z).
+        "settings_note_workspace_todos_tab_disabled",
         # Tray strings moved behind t() (maintainer review 2026-10-07).
         "todos_tray_summary_active",
         "todos_tray_summary_done",
@@ -827,4 +846,267 @@ def test_chat_todos_box_observer_is_wired_into_the_render_path():
     assert "_ensureChatTodosResizeObserver();" in render
     assert "new ResizeObserver(" in ui
     assert "ro.observe(tray);" in ui
+
+
+# ── Re-gate 2026-10-08T03:10:50Z (head a63ab699) ──────────────────────────
+# One [SHOULD-FIX] and four UX asks. The engineering item is pinned by a node
+# probe that drives the shipped functions; the UX asks are pinned on source +
+# behaviour where they carry logic (the disabled field, the overflow cue, the
+# centred column) so they cannot silently rot.
+
+
+def test_chat_todos_repin_gates_on_auto_follow_and_a_real_box_growth():
+    """[SHOULD-FIX] 1: "The repin yanks the scroll for readers with auto-follow
+    OFF ... return early when window._autoScrollFollow === false, and only repin
+    when the tray's measured box actually grew."
+
+    The earlier fix re-pinned on every render path, i.e. also on the feature-OFF
+    default where the tray is hidden and nothing resized at all.
+    """
+    ui = _read_static("static/ui.js")
+    block = _extract(ui, "function _repinChatTodosTranscript(){", "function renderChatTodos(){")
+    assert "window._autoScrollFollow===false) return;" in block
+    assert block.index("_autoScrollFollow") < block.index("_measureChatTodosTrayHeight()")
+    assert "if(h<=_chatTodosRepinH)" in block
+    # The measurement is factored out so the observer and the repin share it.
+    assert "function _measureChatTodosTrayHeight(){" in ui
+    assert "const h=Math.round(_measureChatTodosTrayHeight());" in ui
+
+
+_REPIN_PROBE = """
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+globalThis.window = {_autoScrollFollow: false};
+let boxHeight = 0;
+const tray = {hidden: false, getBoundingClientRect() { return {height: boxHeight}; }};
+function $(id) { return id === 'chatTodosPanel' ? tray : null; }
+let repins = 0;
+function _repinMessagesAfterComposerResize() { repins++; }
+__HELPER__
+
+// 1. Auto-follow OFF: even a real growth must not touch the scroll position.
+boxHeight = 276;
+_repinChatTodosTranscript();
+assert(repins === 0, 'auto-follow OFF must never re-pin');
+
+// 2. Auto-follow ON: one measured growth re-pins exactly once.
+window._autoScrollFollow = true;
+_repinChatTodosTranscript();
+assert(repins === 1, 'a measured growth re-pins the transcript');
+_repinChatTodosTranscript();
+assert(repins === 1, 'an unchanged box does not re-pin again');
+
+// 3. Collapsing shrinks the box. A growing viewport cannot strand a pinned
+//    reader (scrollHeight - clientHeight only falls, and the browser clamps
+//    scrollTop), so a shrink is not a repin either.
+boxHeight = 36;
+_repinChatTodosTranscript();
+assert(repins === 1, 'a shrink must not re-pin');
+
+// 4. Re-expanding grows it again.
+boxHeight = 276;
+_repinChatTodosTranscript();
+assert(repins === 2, 're-expanding re-pins again');
+
+// 5. Feature-OFF default: the tray is hidden, nothing rendered, so no path may
+//    pull a reader who scrolled away back to the bottom.
+repins = 0;
+tray.hidden = true;
+boxHeight = 0;
+_repinChatTodosTranscript();
+_repinChatTodosTranscript();
+assert(repins === 0, 'a hidden tray (feature OFF) must not pull the reader down');
+console.log('ok');
+"""
+
+
+def test_chat_todos_repin_probe(tmp_path):
+    ui = _read_static("static/ui.js")
+    helper = _extract(
+        ui, "let _chatTodosResizeObserver=null;", "function _syncChatTodosExpanded("
+    ) + _extract(
+        ui, "function _repinChatTodosTranscript(){", "function renderChatTodos(){"
+    )
+    script = _REPIN_PROBE.replace("__HELPER__", helper)
+    assert _run_node(tmp_path, "chat_todos_repin_probe.js", script).strip() == "ok"
+
+
+def test_chat_todos_rows_are_centred_on_the_reading_column():
+    """UX ask: "Centre the expanded rows within the reading column (the body is
+    still full width)." The rows now sit in their own centred column that mirrors
+    .messages-inner's width contract, so the row text lines up with the message
+    text instead of spanning the whole shell."""
+    css = _read_static("static/style.css")
+    ui = _read_static("static/ui.js")
+    # Same max-width/padding contract as .messages-inner (which is driven by
+    # --msg-max), including its <=640px mobile mirror.
+    assert ".chat-todos-rows{margin:0 auto;width:100%;padding:0 24px;max-width:var(--msg-max);}" in css
+    assert "@media(min-width:1400px){.chat-todos-rows{max-width:calc(var(--msg-max) + 40px);}}" in css
+    assert "@media(min-width:1800px){.chat-todos-rows{max-width:calc(var(--msg-max) + 80px);}}" in css
+    assert (
+        "@media(max-width:640px){.chat-todos-rows{max-width:100%;"
+        "padding-left:max(10px,env(safe-area-inset-left,0));"
+        "padding-right:max(10px,env(safe-area-inset-right,0));}}" in css
+    )
+    # ...and the column it mirrors really is the transcript's.
+    assert ".messages-inner{margin:0 auto;width:100%;padding:20px 24px 32px;" in css
+    assert ".messages-inner { max-width: var(--msg-max); }" in css
+    # The body's own horizontal padding is gone, so the rows' containing block is
+    # the same box .messages-inner lives in — that is what makes them agree.
+    assert ".chat-todos-body{max-height:240px;overflow-y:auto;border-top:1px solid var(--border);padding:4px 0 8px;}" in css
+    assert 'body.innerHTML=`<div class="chat-todos-rows">' in ui
+
+
+def test_chat_todos_capped_body_has_an_overflow_cue():
+    """UX ask: "A mobile overflow cue (fade or scrollbar) when the capped body
+    scrolls." The capped body's scrollbar is an overlay the phone only reveals
+    mid-scroll, so a truncated list read as complete."""
+    idx = _read_static("static/index.html")
+    css = _read_static("static/style.css")
+    ui = _read_static("static/ui.js")
+    assert 'id="chatTodosBodyWrap"' in idx
+    assert 'class="chat-todos-scroll-cue"' in idx
+    assert ".chat-todos-body-wrap{position:relative;}" in css
+    assert ".chat-todos-body-wrap.chat-todos-overflowing .chat-todos-scroll-cue{opacity:1;}" in css
+    # Collapsed bodies render nothing, so the cue must not paint there either.
+    assert ".chat-todos:not(.open) .chat-todos-scroll-cue{display:none;}" in css
+    # The capped (mobile) body is still what the cue exists for.
+    assert ".chat-todos-body{max-height:200px;}" in css
+    assert "function _wireChatTodosScrollCue(){" in ui
+    assert "body.addEventListener('scroll',_updateChatTodosScrollCue,{passive:true})" in ui
+    assert "_updateChatTodosScrollCue();" in ui
+
+
+_SCROLL_CUE_PROBE = """
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+const classes = new Set();
+const wrap = {classList: {
+  toggle(c, on) { if (on) classes.add(c); else classes.delete(c); return !!on; },
+  contains(c) { return classes.has(c); },
+}};
+const body = {scrollTop: 0, listeners: {}, addEventListener(t, f) { this.listeners[t] = f; }};
+let sh = 600;
+let ch = 200;
+Object.defineProperty(body, 'scrollHeight', {get() { return sh; }});
+Object.defineProperty(body, 'clientHeight', {get() { return ch; }});
+function $(id) { return id === 'chatTodosBody' ? body : (id === 'chatTodosBodyWrap' ? wrap : null); }
+__HELPER__
+_wireChatTodosScrollCue();
+assert(typeof body.listeners.scroll === 'function', 'the body scroll event drives the cue');
+_updateChatTodosScrollCue();
+assert(classes.has('chat-todos-overflowing'), 'content below the fold shows the cue');
+body.scrollTop = 400;
+_updateChatTodosScrollCue();
+assert(!classes.has('chat-todos-overflowing'), 'the cue clears when the reader reaches the bottom');
+sh = 150;
+body.scrollTop = 0;
+_updateChatTodosScrollCue();
+assert(!classes.has('chat-todos-overflowing'), 'nothing to scroll => no cue');
+console.log('ok');
+"""
+
+
+def test_chat_todos_scroll_cue_probe(tmp_path):
+    ui = _read_static("static/ui.js")
+    helper = _extract(ui, "let _chatTodosCueWired=false;", "function scheduleTodosRefresh(){")
+    script = _SCROLL_CUE_PROBE.replace("__HELPER__", helper)
+    assert _run_node(tmp_path, "chat_todos_scroll_cue_probe.js", script).strip() == "ok"
+
+
+def test_workspace_todos_setting_sits_next_to_the_tray_setting():
+    """UX ask: "Put the tray settings next to each other." The field that the tray
+    takes over must be adjacent to the tray toggle, so the cause of its disabled
+    state is visible right there."""
+    idx = _read_static("static/index.html")
+    chat_at = idx.find('id="settingsChatTodosInChat"')
+    field_at = idx.find('id="settingsWorkspaceTodosTabField"')
+    assert chat_at != -1 and field_at != -1
+    assert chat_at < field_at
+    between = idx[chat_at:field_at]
+    # Only the tray field's own markup separates them: no unrelated settings row
+    # (nor a second settings-field id) may sit in between.
+    assert between.count('id="settings') == 1
+    assert "settingsSessionJumpButtons" not in between
+    assert "settingsSessionEndlessScroll" not in between
+    assert "settingsWorkspacePanelOpen" not in between
+
+
+_WORKSPACE_FIELD_PROBE = """
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+globalThis.window = {_workspaceTodosTab: true};
+const els = {};
+function $(id) { return els[id] || null; }
+const field = {hidden: true, classList: {
+  _s: new Set(),
+  toggle(c, on) { if (on) this._s.add(c); else this._s.delete(c); return !!on; },
+  contains(c) { return this._s.has(c); },
+}};
+const box = {disabled: false};
+const note = {hidden: false};
+const tab = {hidden: false};
+els.settingsWorkspaceTodosTabField = field;
+els.settingsWorkspaceTodosTab = box;
+els.settingsWorkspaceTodosTabNote = note;
+els.workspaceTodosTab = tab;
+const document = {querySelector() { return null; }};
+let trayOn = true;
+function chatTodosEnabled() { return trayOn; }
+__HELPER__
+_applyWorkspaceTodosTabVisibility();
+assert(box.disabled === true, 'the field is disabled, not hidden, while the tray is on');
+assert(field.hidden === false, 'the field stays visible');
+assert(field.classList.contains('is-disabled'), 'the row is dimmed as disabled');
+assert(note.hidden === false, 'the explanation is shown');
+assert(tab.hidden === true, 'the workspace tab itself still follows the tray');
+trayOn = false;
+_applyWorkspaceTodosTabVisibility();
+assert(box.disabled === false, 'the field re-enables when the tray is off');
+assert(field.hidden === false, 'still visible');
+assert(!field.classList.contains('is-disabled'), 'the dimming clears');
+assert(note.hidden === true, 'the explanation is hidden again');
+assert(tab.hidden === false, 'the workspace tab follows the workspace preference');
+console.log('ok');
+"""
+
+
+def test_workspace_todos_field_disabled_not_hidden_probe(tmp_path):
+    """UX ask: "show the workspace field disabled with an explanation instead of
+    hiding it" — hiding it made the two settings silently contradict each other."""
+    panels = _read_static("static/panels.js")
+    idx = _read_static("static/index.html")
+    helper = _extract(
+        panels, "function _applyWorkspaceTodosTabVisibility(){", "\nfunction "
+    )
+    assert "field.hidden=trayOn" not in helper
+    assert "box.disabled=!!trayOn" in helper
+    assert "field.classList.toggle('is-disabled',!!trayOn)" in helper
+    assert "note.hidden=!trayOn" in helper
+    assert 'id="settingsWorkspaceTodosTabNote"' in idx
+    assert 'data-i18n="settings_note_workspace_todos_tab_disabled"' in idx
+    script = _WORKSPACE_FIELD_PROBE.replace("__HELPER__", helper)
+    assert _run_node(tmp_path, "workspace_todos_field_probe.js", script).strip() == "ok"
+
+
+def test_chat_todos_shared_row_renderer_serves_the_tray():
+    """UX ask: "Tidy the shared-row renderer and drop the dead CSS." One renderer
+    (renderTodoRow) now serves the sidebar panel, the workspace tab and the tray;
+    the tray-only class hooks and their CSS are gone."""
+    ui = _read_static("static/ui.js")
+    css = _read_static("static/style.css")
+    shared = _extract_row_renderer(ui)
+    assert "opts.rowClass" in shared
+    assert "const compact=!!opts.compact;" in shared
+    assert 'class="todos-row${rowClass}"' in shared
+    # Dead tray-only styling: the row markup comes from the shared renderer now.
+    assert ".chat-todos-row .todos-status" not in css
+    assert ".chat-todos-row .todos-content" not in css
+    assert ".chat-todos-row .todos-meta" not in css
+    # ...but the shared renderer's metadata class is a real hook, so the tray can
+    # still drop its own trailing border.
+    assert ".chat-todos-row:last-child{border-bottom:none;}" in css
+    # The sidebar panel / workspace tab keep their metadata rows.
+    panels = _read_static("static/panels.js")
+    workspace = _read_static("static/workspace.js")
+    assert "renderTodoRows(todos, {metadata:true})" in panels
+    assert "renderTodoRows(todos, {metadata:true})" in workspace
+
 

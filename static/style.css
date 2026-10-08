@@ -2282,14 +2282,29 @@
     .chat-todos-title svg{flex-shrink:0;color:var(--accent);}
     .chat-todos-chevron{flex-shrink:0;display:inline-flex;align-items:center;color:var(--muted);transition:transform .18s ease;}
     .chat-todos.open .chat-todos-chevron{transform:rotate(180deg);}
-    .chat-todos-body{max-height:240px;overflow-y:auto;border-top:1px solid var(--border);padding:4px 12px 8px;}
+    .chat-todos-body{max-height:240px;overflow-y:auto;border-top:1px solid var(--border);padding:4px 0 8px;}
     .chat-todos:not(.open) .chat-todos-body{display:none;}
-    .chat-todos-row{display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);}
+    /* The rows come from the ONE shared row renderer (renderTodoRow), so the tray
+       owns no row styling any more — it only centres that renderer on the
+       transcript's reading column (re-gate 2026-10-08T03:10:50Z). That column
+       is .messages-inner's, so these rules (plus the <=640px mirror below)
+       intentionally repeat its max-width/padding contract: the row text then
+       lines up with the message text at every width. */
+    .chat-todos-rows{margin:0 auto;width:100%;padding:0 24px;max-width:var(--msg-max);}
+    @media(min-width:1400px){.chat-todos-rows{max-width:calc(var(--msg-max) + 40px);}}
+    @media(min-width:1800px){.chat-todos-rows{max-width:calc(var(--msg-max) + 80px);}}
+    @media(max-width:640px){.chat-todos-rows{max-width:100%;padding-left:max(10px,env(safe-area-inset-left,0));padding-right:max(10px,env(safe-area-inset-right,0));}}
     .chat-todos-row:last-child{border-bottom:none;}
-    .chat-todos-row .todos-status{flex-shrink:0;display:inline-flex;margin-top:1px;}
-    .chat-todos-row .todos-content{flex:1 1 auto;min-width:0;font-size:12.5px;line-height:1.4;overflow-wrap:anywhere;}
-    .chat-todos-row .todos-meta{font-size:10.5px;color:var(--muted);opacity:.65;margin-top:1px;}
     .chat-todos-empty{font-size:12px;color:var(--muted);padding:8px 2px;}
+    /* Overflow cue: the capped body scrolls with an overlay scrollbar that mobile
+       browsers only reveal mid-scroll, so a truncated list read as a complete one.
+       This bottom fade sits on the WRAPPER (outside the scroller, so it does not
+       scroll away) and appears only while content remains below the fold
+       (re-gate 2026-10-08T03:10:50Z). */
+    .chat-todos-body-wrap{position:relative;}
+    .chat-todos-scroll-cue{position:absolute;left:0;right:0;bottom:0;height:22px;pointer-events:none;opacity:0;transition:opacity .15s ease;background:linear-gradient(to bottom,rgba(0,0,0,0),var(--surface));}
+    .chat-todos:not(.open) .chat-todos-scroll-cue{display:none;}
+    .chat-todos-body-wrap.chat-todos-overflowing .chat-todos-scroll-cue{opacity:1;}
     /* The floating Start jump pill is anchored to the shell's top-right; when
        the tray strip occupies that band, drop the pill below it. The strip's
        LIVE height is published on the shell by _syncChatTodosShellClass, so the
@@ -2297,7 +2312,7 @@
        band and painted the pill inside the task rows (re-gate
        2026-10-07T20:13:25Z, [SHOULD-FIX] 2). */
     .messages-shell.chat-todos-visible #jumpToSessionStartBtn{top:calc(var(--chat-todos-h,36px) + 7px);}
-    @media(prefers-reduced-motion:reduce){.chat-todos-head{transition:none;}.chat-todos-chevron{transition:none;}}
+    @media(prefers-reduced-motion:reduce){.chat-todos-head{transition:none;}.chat-todos-chevron{transition:none;}.chat-todos-scroll-cue{transition:none;}}
     @media(max-width:768px){
       .chat-todos-head{padding:0 10px;}
       .chat-todos-body{max-height:200px;}
@@ -5062,6 +5077,11 @@ main.main > #mainPlugin{display:none;}
 /* Each logical form row is a card surface. Stack with comfortable gap. */
 #mainSettings .settings-field{margin-bottom:12px;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--sidebar);}
 #mainSettings .settings-field:last-of-type{margin-bottom:16px;}
+/* A field the tray has taken ownership of stays in place, visibly disabled, with
+   an explanation underneath (reviewer re-gate 2026-10-08T03:10:50Z). */
+#mainSettings .settings-field.is-disabled{opacity:.55;}
+#mainSettings .settings-field.is-disabled label{cursor:default;}
+#mainSettings .settings-field.is-disabled input{cursor:default;}
 #mainSettings .settings-field > label{display:block;font-size:12px;font-weight:500;letter-spacing:.01em;color:var(--muted);margin-bottom:6px;}
 /* Checkbox rows use inline flex labels — don't turn them into stacked caps */
 #mainSettings .settings-field > label[style*="display:flex"]{color:var(--text);font-size:13px;font-weight:500;margin-bottom:0;}

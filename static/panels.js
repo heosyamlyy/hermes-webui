@@ -9017,15 +9017,23 @@ function _rememberPreferencesSaved(payload){
 
 function _applyWorkspaceTodosTabVisibility(){
   // The in-chat task-list tray replaces every other Todos surface, so while it
-  // is on it also owns the workspace-panel Todos tab and hides that setting —
-  // otherwise the two controls contradict each other (reviewer re-gate
-  // 2026-10-07T18:08:02Z).
+  // is on it also owns the workspace-panel Todos tab. The setting row stays
+  // VISIBLE but disabled, with an explanation, instead of vanishing: hiding it
+  // left the user staring at a tab that refused to appear with no way to see
+  // why (reviewer re-gate 2026-10-08T03:10:50Z).
   const trayOn=(typeof chatTodosEnabled==='function')&&chatTodosEnabled();
   const want=!!window._workspaceTodosTab&&!trayOn;
   const tab=$('workspaceTodosTab');
   if(tab) tab.hidden=!want;
   const field=$('settingsWorkspaceTodosTabField');
-  if(field) field.hidden=trayOn;
+  const box=$('settingsWorkspaceTodosTab');
+  if(box) box.disabled=!!trayOn;
+  if(field){
+    if(field.classList) field.classList.toggle('is-disabled',!!trayOn);
+    field.hidden=false;
+  }
+  const note=$('settingsWorkspaceTodosTabNote');
+  if(note) note.hidden=!trayOn;
   const rp=document.querySelector('.rightpanel');
   if(!want && rp && rp.dataset.activeTab==='todos'){
     if(typeof switchWorkspacePanelTab==='function') switchWorkspacePanelTab('files');
