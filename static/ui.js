@@ -10537,7 +10537,10 @@ function _publishChatTodosHeight(){
   if(typeof document==='undefined'||!document.querySelector) return 0;
   const shell=document.querySelector('.messages-shell');
   if(!shell||!shell.style) return 0;
-  const h=Math.round(_measureChatTodosTrayHeight());
+  // The measured box is CEILed: the whole-tray cap below can leave a fractional
+  // height, and rounding DOWN shaved the Start pill's >=7px clearance
+  // (reviewer re-gate 2026-10-08T09:54:47Z, must-fix 1).
+  const h=Math.ceil(_measureChatTodosTrayHeight());
   if(h>0&&shell.style.setProperty) shell.style.setProperty('--chat-todos-h',h+'px');
   return h;
 }
@@ -10662,8 +10665,10 @@ function _repinChatTodosTranscript(){
   // with follow ON compared against the stale pre-hide height, read "not
   // grown", and skipped the re-pin — stranding a pinned reader. Tracking the
   // box unconditionally (follow OUT of the measurement) keeps the baseline
-  // honest; only the ACTUAL re-pin stays gated.
-  const h=Math.round(_measureChatTodosTrayHeight());
+  // honest; only the ACTUAL re-pin stays gated. The measurement is CEILed here
+  // too, so the growth test compares against the SAME number the pill offset
+  // publishes (reviewer re-gate 2026-10-08T09:54:47Z, must-fix 1).
+  const h=Math.ceil(_measureChatTodosTrayHeight());
   const grew=h>_chatTodosRepinH;
   _chatTodosRepinH=h;
   if(typeof window!=='undefined'&&window._autoScrollFollow===false) return;

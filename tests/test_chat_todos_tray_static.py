@@ -877,9 +877,16 @@ def test_chat_todos_repin_gates_on_auto_follow_and_a_real_box_growth():
     )
     assert "const grew=h>_chatTodosRepinH;" in block
     assert "_chatTodosRepinH=h;" in block
-    # The measurement is factored out so the observer and the repin share it.
+    # The measurement is factored out so the observer and the repin share it;
+    # BOTH call sites CEIL it, so the growth test and the published pill offset
+    # agree on the same number (reviewer re-gate 2026-10-08T09:54:47Z, must-fix 1:
+    # the tray cap leaves fractional heights and rounding down shaved the >=7px
+    # Start-pill clearance).
     assert "function _measureChatTodosTrayHeight(){" in ui
-    assert "const h=Math.round(_measureChatTodosTrayHeight());" in ui
+    assert ui.count("const h=Math.ceil(_measureChatTodosTrayHeight());") == 2
+    assert "Math.round(_measureChatTodosTrayHeight())" not in ui
+    publish = _extract(ui, "function _publishChatTodosHeight(){", "function _syncChatTodosShellClass(")
+    assert "const h=Math.ceil(_measureChatTodosTrayHeight());" in publish
 
 
 _REPIN_PROBE = """
@@ -1159,19 +1166,56 @@ def test_chat_todos_header_takes_the_rows_inset_down_to_640px():
     """Ask 1: "Give the header the rows' inset and move the narrow-header rule
     from 768px to 640px." The header used a 12px inset while the rows and the
     transcript use 24px, so the header icon sat 12px left of the status-icon
-    column (14px between 641 and 768px)."""
+    column (14px between 641 and 768px).
+
+    Re-gate 2026-10-08T09:54:47Z (must-fix 2) stopped patching the BUTTON's own
+    padding: a fixed 24px inset can only line up with the centred rows when the
+    shell happens to be about as wide as --msg-max, and the measured miss was
+    -135.5px at 1440, -355.5px at 1920, -595.5px at 2400. The button is now a
+    full-width hit band with zero padding and the CONTENT span carries the rows'
+    exact column contract, so the icon and the chevron land on the reading
+    column at every width.
+    """
     css = _read_static("static/style.css")
+    idx = _read_static("static/index.html").replace("\r\n", "\n")
+    # The button keeps the whole band as its hit target / hover surface...
     assert (
         ".chat-todos-head{display:flex;align-items:center;gap:8px;width:100%;"
-        "min-height:35px;padding:0 24px;" in css
+        "min-height:35px;padding:0;" in css
     )
+    # ...and the inner span takes the rows' --msg-max mirror (three pins).
+    assert (
+        ".chat-todos-head-inner{display:flex;align-items:center;gap:8px;width:100%;"
+        "min-height:35px;margin:0 auto;padding:0 24px;max-width:var(--msg-max);}" in css
+    )
+    assert (
+        "@media(min-width:1400px){.chat-todos-head-inner{max-width:calc(var(--msg-max) + 40px);}}" in css
+    )
+    assert (
+        "@media(min-width:1800px){.chat-todos-head-inner{max-width:calc(var(--msg-max) + 80px);}}" in css
+    )
+    # The markup really wraps the header's two children in that span.
+    assert '<span class="chat-todos-head-inner">' in idx
+    head_open = idx.index('class="chat-todos-head"')
+    inner_open = idx.index('<span class="chat-todos-head-inner">', head_open)
+    chevron = idx.index('class="chat-todos-chevron"', inner_open)
+    inner_close = idx.index("</span>\n              </button>", chevron)
+    assert inner_open < chevron < inner_close
     # Exactly ONE narrow rule, and it sits in the SAME <=640px block as the rows'
     # 10px safe-area mirror (proved by "no @media between them"), right after it.
-    assert css.count(".chat-todos-head{padding:0 10px;}") == 1
+    narrow = (
+        ".chat-todos-head-inner{max-width:100%;"
+        "padding-left:max(10px,env(safe-area-inset-left,0));"
+        "padding-right:max(10px,env(safe-area-inset-right,0));}"
+    )
+    assert css.count(narrow) == 1
     rows_mobile = css.index(".chat-todos-rows{max-width:100%;")
-    head_mobile = css.index(".chat-todos-head{padding:0 10px;}")
+    head_mobile = css.index(narrow)
     assert rows_mobile < head_mobile
     assert "@media(" not in css[rows_mobile:head_mobile]
+    # The button itself keeps NO width-dependent padding to fall out of step.
+    assert ".chat-todos-head{padding:0 10px;}" not in css
+    assert ".chat-todos-head{padding:0 24px;" not in css
     # The 768px block kept only the body cap.
     at768 = css.index("@media(max-width:768px){")
     end768 = css.index(".messages{flex:1;overflow-y:auto;", at768)
@@ -1189,6 +1233,44 @@ def test_chat_todos_body_cap_carries_a_height_term():
     # The width-only caps are gone.
     assert ".chat-todos-body{max-height:240px;" not in css
     assert ".chat-todos-body{max-height:200px;}" not in css
+
+
+def test_chat_todos_tray_is_capped_against_the_messages_shell():
+    """Must-fix 1 (reviewer re-gate 2026-10-08T09:54:47Z): "The transcript can
+    disappear entirely on short screens." The 40vh BODY cap ignored the space the
+    header and the composer take, so 12 rows plus a five-line draft left the
+    transcript 0px tall at 844x390 / 1440x420 (103px / 133px with the tray off).
+    The tray now owns a cap against .messages-shell and its body shrinks +
+    scrolls inside it; the body caps stay as the inner limit."""
+    css = _read_static("static/style.css")
+    assert (
+        ".chat-todos{flex:0 0 auto;width:100%;background:var(--surface);"
+        "border-bottom:1px solid var(--border);max-height:calc(50% - 1px);"
+        "min-height:0;display:flex;flex-direction:column;overflow:hidden;}" in css
+    )
+    # 50% resolves against the shell, so the shell must still be the sized flex
+    # column the tray is an item of.
+    assert (
+        ".messages-shell{flex:1;min-height:0;position:relative;"
+        "display:flex;flex-direction:column;}" in css
+    )
+    # The strip ships `hidden`, and the author `display:flex` above would outrank
+    # the UA [hidden] rule without this opt-out (the collapsed tray would paint).
+    assert ".chat-todos[hidden]{display:none;}" in css
+    # The header keeps its band...
+    assert (
+        ".chat-todos-head{display:flex;align-items:center;gap:8px;width:100%;"
+        "min-height:35px;padding:0;" in css
+    )
+    assert "transition:background .12s;flex-shrink:0;}" in css
+    # ...the body wrapper takes the remainder and may shrink BELOW its content
+    # (min-height:0 on both it and the body), which is what lets the capped body
+    # scroll instead of shoving the transcript off-screen.
+    assert ".chat-todos-body-wrap{min-height:0;display:flex;flex-direction:column;}" in css
+    assert ".chat-todos-body{min-height:0;}" in css
+    # ...and the body's own caps stay as the inner limit.
+    assert ".chat-todos-body{max-height:min(240px,40vh);" in css
+    assert ".chat-todos-body{max-height:min(200px,40vh);}" in css
 
 
 def test_chat_todos_overflow_cue_is_strong_enough():

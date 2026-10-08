@@ -2275,9 +2275,25 @@
        strip pushes the transcript down instead of floating over its first
        lines (reviewer re-gate 2026-10-07T18:08:02Z). Expanded it grows in
        place and the scroller shrinks; the phone layout only tightens padding. */
-    .chat-todos{flex:0 0 auto;width:100%;background:var(--surface);border-bottom:1px solid var(--border);}
-    .chat-todos-head{display:flex;align-items:center;gap:8px;width:100%;min-height:35px;padding:0 24px;background:transparent;border:none;cursor:pointer;color:var(--text);font-size:13px;font-weight:600;text-align:left;transition:background .12s;}
+    /* Whole-tray cap (reviewer re-gate 2026-10-08T09:54:47Z, must-fix 1): the
+       body's 40vh cap ignored the header + composer, so 12 rows plus a five-line
+       draft drove the transcript to 0px at 844x390 and 1440x420. Own the tray's
+       height against .messages-shell and let the body shrink + scroll; the body
+       caps below stay as its inner limit. */
+    .chat-todos{flex:0 0 auto;width:100%;background:var(--surface);border-bottom:1px solid var(--border);max-height:calc(50% - 1px);min-height:0;display:flex;flex-direction:column;overflow:hidden;}
+    /* The author `display:flex` just added outranks the UA [hidden] rule, so the
+       collapsed strip has to opt out explicitly. */
+    .chat-todos[hidden]{display:none;}
+    .chat-todos-head{display:flex;align-items:center;gap:8px;width:100%;min-height:35px;padding:0;background:transparent;border:none;cursor:pointer;color:var(--text);font-size:13px;font-weight:600;text-align:left;transition:background .12s;flex-shrink:0;}
     .chat-todos-head:hover{background:var(--hover-bg);}
+    /* The header CONTENT sits on the rows' reading column (the same --msg-max
+       contract as .chat-todos-rows below); the BUTTON stays full width with zero
+       padding, so the whole band is still the hit target and the hover surface,
+       and the chevron lines up with the rows' right edge at every width
+       (re-gate 2026-10-08T09:54:47Z, must-fix 2). */
+    .chat-todos-head-inner{display:flex;align-items:center;gap:8px;width:100%;min-height:35px;margin:0 auto;padding:0 24px;max-width:var(--msg-max);}
+    @media(min-width:1400px){.chat-todos-head-inner{max-width:calc(var(--msg-max) + 40px);}}
+    @media(min-width:1800px){.chat-todos-head-inner{max-width:calc(var(--msg-max) + 80px);}}
     .chat-todos-title{display:inline-flex;align-items:center;gap:7px;min-width:0;flex:1;}
     .chat-todos-title svg{flex-shrink:0;color:var(--accent);}
     .chat-todos-chevron{flex-shrink:0;display:inline-flex;align-items:center;color:var(--muted);transition:transform .18s ease;}
@@ -2301,6 +2317,12 @@
        This bottom fade sits on the WRAPPER (outside the scroller, so it does not
        scroll away) and appears only while content remains below the fold
        (re-gate 2026-10-08T03:10:50Z). */
+    /* The tray is a column (above): the head keeps its band and this wrapper
+       takes the remainder, shrinking below its content (min-height:0 on both it
+       and the body) so the capped body scrolls instead of shoving the transcript
+       off-screen (re-gate 2026-10-08T09:54:47Z, must-fix 1). */
+    .chat-todos-body-wrap{min-height:0;display:flex;flex-direction:column;}
+    .chat-todos-body{min-height:0;}
     .chat-todos-body-wrap{position:relative;}
     .chat-todos-scroll-cue{position:absolute;left:0;right:0;bottom:0;height:40px;pointer-events:none;opacity:0;transition:opacity .15s ease;background:linear-gradient(to bottom,rgba(0,0,0,0),var(--surface));}
     .chat-todos:not(.open) .chat-todos-scroll-cue{display:none;}
@@ -3206,10 +3228,11 @@
        2026-10-08T03:10:50Z). Kept in THIS block — not a second @media — so the
        mobile containment rules asserted for .messages-inner stay together. */
     .chat-todos-rows{max-width:100%;padding-left:max(10px,env(safe-area-inset-left,0));padding-right:max(10px,env(safe-area-inset-right,0));}
-    /* ...and the tray header follows that same 10px mirror, so the header icon
+    /* ...and the header CONTENT follows that same 10px mirror, so the header icon
        keeps sitting on the row column at phone widths (re-gate
-       2026-10-08T08:44:28Z, item 1). */
-    .chat-todos-head{padding:0 10px;}
+       2026-10-08T09:54:47Z, must-fix 2: the mirror moved from the button onto the
+       inner span, which is what carries the rows' column contract). */
+    .chat-todos-head-inner{max-width:100%;padding-left:max(10px,env(safe-area-inset-left,0));padding-right:max(10px,env(safe-area-inset-right,0));}
     .msg-body{padding-left:0;max-width:100%;}
     .msg-role{font-size:12px;}
     .composer-wrap{padding:8px 10px calc(12px + var(--keyboard-bottom-inset, 0px))!important;padding-left:max(10px,env(safe-area-inset-left,0))!important;padding-right:max(10px,env(safe-area-inset-right,0))!important;}
