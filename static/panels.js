@@ -7764,11 +7764,17 @@ function _applyTabOrder(order){
 function _applyTabVisibility(hidden){
   hidden=_sanitizeTabPanelList(hidden);
   _applyTabOrder(_getTabOrder());
+  // Chat-todos: when the in-chat tray is enabled, the sidebar Todos entry
+  // must remain hidden regardless of hidden_tabs content (avoid duplication).
+  // We re-apply this preference after every hidden_tabs change so profile
+  // switches or settings saves cannot overwrite it.
+  var chatTodosOn=(typeof chatTodosEnabled==='function'?chatTodosEnabled():false);
   // Hide/unhide all [data-panel] elements (sidebar-nav buttons + rail buttons)
   document.querySelectorAll('[data-panel]').forEach(function(el){
     var panel=el.dataset.panel;
     if(!panel)return;
     var shouldHide=hidden.indexOf(panel)!==-1;
+    if(panel==='todos'&&chatTodosOn) shouldHide=true;
     // Never hide always-visible panels (chat, settings) even if present in hidden_tabs
     if(_ALWAYS_VISIBLE_TABS.has(panel)) shouldHide=false;
     el.classList.toggle('nav-tab-hidden',shouldHide);
@@ -7780,6 +7786,13 @@ function _applyTabVisibility(hidden){
   if(activeEl&&activeEl.classList.contains('nav-tab-hidden')){
     if(typeof switchPanel==='function') switchPanel('chat');
   }
+}
+
+function _tabVisibilityChipForcedOff(panel){
+  // The in-chat tray force-hides the sidebar Todos entry, so that panel's own
+  // chip must render OFF and its click must resolve the tray, not flip a
+  // hidden_tabs bit that cannot change what is on screen.
+  return panel==='todos'&&typeof chatTodosEnabled==='function'&&chatTodosEnabled();
 }
 
 function _renderTabVisibilityChips(){
@@ -7797,7 +7810,7 @@ function _renderTabVisibilityChips(){
     var chip=document.createElement('button');
     chip.type='button';
     chip.className='tab-visibility-chip';
-    var isOff=hidden.indexOf(panel)!==-1;
+    var isOff=hidden.indexOf(panel)!==-1||_tabVisibilityChipForcedOff(panel);
     if(isOff)chip.classList.add('chip-off');
     chip.textContent=label;
     chip.setAttribute('data-tab-panel',panel);
@@ -7858,6 +7871,28 @@ function _handleTabVisibilityChipDrop(e,targetPanel){
 
 function _toggleTabVisibilityChip(panel){
   if(_ALWAYS_VISIBLE_TABS.has(panel))return;
+  // A tray-forced chip cannot be turned on by editing hidden_tabs: the tray
+  // re-hides the tab on every pass, so two clicks left the chip ON with the
+  // tab still hidden. Turn the tray off instead — it is what owns the hide —
+  // so the click actually restores the sidebar Todos tab.
+  if(_tabVisibilityChipForcedOff(panel)){
+    // The tray owns the hide — turn it off. But the user may ALSO have hidden
+    // this tab independently (hidden_tabs), and that bit survives the tray
+    // being disabled: the click then left the tab hidden and the chip still
+    // OFF, i.e. it took a second click to reveal a tab the user had just
+    // switched on (re-gate 2026-10-07, static/panels.js:7878). Drop the
+    // independent hide in the same explicit chip-enable branch.
+    var forced=_getHiddenTabs();
+    var forcedIdx=forced.indexOf(panel);
+    if(forcedIdx!==-1){
+      forced.splice(forcedIdx,1);
+      _setHiddenTabs(forced);
+    }
+    if(typeof _chatTodosToggleEnabled==='function') _chatTodosToggleEnabled(false);
+    _renderTabVisibilityChips();
+    _scheduleAppearanceAutosave();
+    return;
+  }
   var hidden=_getHiddenTabs();
   var idx=hidden.indexOf(panel);
   if(idx!==-1){
@@ -8981,10 +9016,26 @@ function _rememberPreferencesSaved(payload){
 }
 
 function _applyWorkspaceTodosTabVisibility(){
+  // The in-chat task-list tray replaces every other Todos surface, so while it
+  // is on it also owns the workspace-panel Todos tab. The setting row stays
+  // VISIBLE but disabled, with an explanation, instead of vanishing: hiding it
+  // left the user staring at a tab that refused to appear with no way to see
+  // why (reviewer re-gate 2026-10-08T03:10:50Z).
+  const trayOn=(typeof chatTodosEnabled==='function')&&chatTodosEnabled();
+  const want=!!window._workspaceTodosTab&&!trayOn;
   const tab=$('workspaceTodosTab');
-  if(tab) tab.hidden=!window._workspaceTodosTab;
+  if(tab) tab.hidden=!want;
+  const field=$('settingsWorkspaceTodosTabField');
+  const box=$('settingsWorkspaceTodosTab');
+  if(box) box.disabled=!!trayOn;
+  if(field){
+    if(field.classList) field.classList.toggle('is-disabled',!!trayOn);
+    field.hidden=false;
+  }
+  const note=$('settingsWorkspaceTodosTabNote');
+  if(note) note.hidden=!trayOn;
   const rp=document.querySelector('.rightpanel');
-  if(!window._workspaceTodosTab && rp && rp.dataset.activeTab==='todos'){
+  if(!want && rp && rp.dataset.activeTab==='todos'){
     if(typeof switchWorkspacePanelTab==='function') switchWorkspacePanelTab('files');
   }
 }
@@ -9226,6 +9277,14 @@ async function loadSettingsPanel(){
       window._sessionEndlessScrollEnabled=endlessScrollCb.checked;
       endlessScrollCb.onchange=function(){
         window._sessionEndlessScrollEnabled=this.checked;
+        _scheduleAppearanceAutosave();
+      };
+    }
+    const chatTodosCb=$('settingsChatTodosInChat');
+    if(chatTodosCb){
+      chatTodosCb.checked=!!(typeof chatTodosEnabled==='function'&&chatTodosEnabled());
+      chatTodosCb.onchange=function(){
+        if(typeof _chatTodosToggleEnabled==='function') _chatTodosToggleEnabled(this.checked);
         _scheduleAppearanceAutosave();
       };
     }
