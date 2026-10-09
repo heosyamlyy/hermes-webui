@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+import shutil
 import re
 import threading
 import time
@@ -1117,6 +1118,64 @@ def _read_metadata_json_prefix(path, max_prefix_bytes=65536):
     return None
 
 
+# Ceiling for the legacy exact-count fallback in _sidecar_message_count_bounded.
+# Below this a full parse is harmless and preserves the #1558 shrink guard for
+# sidecars that carry no message_count; above it we refuse and the caller fails
+# safe, because a full parse is exactly what OOM-killed the service.
+_LEGACY_COUNT_FULL_PARSE_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _sidecar_message_count_bounded(path, sid=None) -> int:
+    """Previous on-disk message count via a bounded read -- never a full parse.
+
+    ``Session.save()`` used to ``read_text()`` + ``json.loads()`` the ENTIRE
+    previous sidecar on every save purely to compare message counts. Measured
+    amplification is ~3.7x the file size in peak RSS (the sidecar is written
+    with ``ensure_ascii=False``, so the decoded str is UCS-2 at 2 bytes/char),
+    and on the 6.23 GiB session of 2026-10-08 that made save() the direct
+    allocator behind three GLOBAL oom-kills at ~115 GB RSS.
+
+    ``save()`` itself writes ``message_count`` into the metadata prefix
+    (BEFORE the messages array, see #5854), so a bounded 64 KiB read answers
+    the question. Deliberately does NOT call ``_persisted_message_count()``:
+    that helper falls back to a full ``Session.load()`` for legacy sidecars,
+    which would reintroduce exactly the failure this removes.
+
+    Returns -1 when the count cannot be determined, preserving the previous
+    behaviour for an unparseable sidecar.
+    """
+    try:
+        prefix = _read_metadata_json_prefix(path)
+        if prefix:
+            count = _parse_nonnegative_int(json.loads(prefix).get('message_count'))
+            if count is not None:
+                return count
+    except Exception:
+        pass
+    # Legacy sidecar whose prefix carries no message_count: consult the cheap
+    # sidebar index instead of full-parsing.
+    if sid is not None:
+        try:
+            idx = _parse_nonnegative_int(_lookup_index_message_count(sid))
+            if idx is not None:
+                return idx
+        except Exception:
+            pass
+    # Still unknown. A legacy or externally-written sidecar carries neither a
+    # message_count prefix nor an index row, and the #1558 shrink guard needs a
+    # real count -- returning "unknown" here silently dropped the backup for
+    # exactly those files. Full-parsing is safe while the file is SMALL; only
+    # the multi-GB case is dangerous, and that is the case the caller must fail
+    # safe on. The largest healthy sidecar in a real corpus is tens of MB.
+    try:
+        if os.path.getsize(path) <= _LEGACY_COUNT_FULL_PARSE_MAX_BYTES:
+            with open(path, 'r', encoding='utf-8') as fh:
+                return len(json.load(fh).get('messages') or [])
+    except Exception:
+        pass
+    return -1
+
+
 def _load_session_from_path(path: Path) -> "Session | None":
     """Load a session from an explicit JSON path without consulting SESSION_DIR."""
     try:
@@ -1459,15 +1518,17 @@ class Session:
         # their .bak get restored automatically.
         try:
             if self.path.exists():
-                existing_text = self.path.read_text(encoding='utf-8')
-                try:
-                    existing = json.loads(existing_text)
-                    existing_msg_count = len(existing.get('messages') or [])
-                except (json.JSONDecodeError, ValueError):
-                    existing_msg_count = -1  # corrupt → always back up
+                # Bounded 64 KiB metadata read. Reading the whole previous
+                # sidecar here cost ~3.7x its size in RSS on EVERY save and was
+                # the direct allocator behind the 2026-10-08 global oom-kills
+                # (6.23 GiB sidecar -> ~115 GB RSS). -1 means "count unknown",
+                # exactly as the old json.loads failure branch did.
+                existing_msg_count = _sidecar_message_count_bounded(self.path, self.session_id)
                 incoming_msg_count = len(self.messages or [])
                 if (
-                    existing_msg_count > 0
+                    # != 0 so an UNKNOWN count (-1) also refuses: we must never
+                    # blank a sidecar we could not prove was already empty.
+                    existing_msg_count != 0
                     and incoming_msg_count == 0
                     and (self.active_stream_id or self.pending_user_message)
                 ):
@@ -1480,7 +1541,9 @@ class Session:
                         self.active_stream_id,
                     )
                     return
-                if existing_msg_count > incoming_msg_count:
+                # existing_msg_count < 0 means UNKNOWN -> back up rather than
+                # risk overwriting a file we could not count (fail safe).
+                if existing_msg_count < 0 or existing_msg_count > incoming_msg_count:
                     bak_path = self.path.with_suffix('.json.bak')
                     # SHOULD-FIX #2 (Opus): atomic write via tmp+replace,
                     # mirroring the main save() pattern below. Prevents a
@@ -1494,8 +1557,13 @@ class Session:
                         bak_tmp = bak_path.with_suffix(
                             f'.bak.tmp.{os.getpid()}.{threading.current_thread().ident}'
                         )
-                        with open(bak_tmp, 'w', encoding='utf-8') as bf:
-                            bf.write(existing_text)
+                        # Stream the previous sidecar to the backup instead of
+                        # materialising it as a Python str. This path is rare
+                        # (shrinking saves only), but on an oversized session
+                        # holding the whole file in memory is precisely the
+                        # allocation we just removed from the hot path.
+                        with open(self.path, 'rb') as _src, open(bak_tmp, 'wb') as bf:
+                            shutil.copyfileobj(_src, bf, 1024 * 1024)
                             bf.flush()
                             os.fsync(bf.fileno())
                         _safe_replace(bak_tmp, bak_path)
@@ -6397,6 +6465,17 @@ def all_sessions(diag=None, *, include_lineage_metadata: bool = True):
                 if not s.get('profile'):
                     s['profile'] = 'default'
             return result
+        except MemoryError:
+            # Never answer memory exhaustion by doing MORE work. The full-scan
+            # fallback below Session.load()s every sidecar in the directory,
+            # which on 2026-10-08 meant parsing a 6.23 GiB file at ~3.7x its
+            # size in RSS. Catching MemoryError in the bare `except Exception`
+            # below would turn a single failed index read into a corpus-wide
+            # allocation storm. Fail closed and let the caller surface an error.
+            logger.error(
+                "MemoryError loading session index; refusing to escalate to a full scan"
+            )
+            raise
         except Exception:
             logger.debug("Failed to load session index, falling back to full scan")
     # Full scan fallback
@@ -6416,6 +6495,12 @@ def all_sessions(diag=None, *, include_lineage_metadata: bool = True):
         try:
             s = Session.load(p.stem)
             if s: out.append(s)
+        except MemoryError:
+            # Swallowing this would continue the loop and attempt the NEXT
+            # sidecar with a heap that is already exhausted, thrashing until
+            # the kernel kills the process. Abort the scan instead.
+            logger.error("MemoryError loading session %s; aborting full scan", p.stem)
+            raise
         except Exception:
             logger.debug("Failed to load session from %s", p)
     _diag_stage(diag, "all_sessions.full_scan_overlay")
