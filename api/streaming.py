@@ -5987,6 +5987,28 @@ def _message_identity(msg):
                 '',  # no tool_call_id
                 '__partial__' + reasoning_key,
             )
+        # Same bug class as the _partial branch above, for SETTLED display-only
+        # Thinking rows. Those keep `_partial` unset, so they fell through to
+        # None and the merge could not key them -- while
+        # _restore_display_reasoning_metadata re-inserts a deepcopy of every
+        # historical reasoning row on every writeback. The result is 2^N
+        # doubling, measured: 1,2,4,8,...  Session 27b42e26d196 reached
+        # 1,975,499 assistant rows (1,598,124 of them sharing id=117) and 6.23
+        # GiB, which OOM-killed the service at ~115 GB RSS (#oom-2026-10-08).
+        #
+        # These rows carry a stable per-message `id`, so key on it first and
+        # fall back to the reasoning digest for pre-id sidecars. Two genuinely
+        # distinct Thinking rows have distinct ids and stay distinct.
+        if _is_reasoning_only_assistant_message(msg):
+            reasoning_key = " ".join(
+                str(msg.get('reasoning') or msg.get('reasoning_content') or '').split()
+            )[:200]
+            return (
+                role,
+                '',  # empty text
+                '',  # no tool_call_id
+                '__reasoning__' + str(msg.get('id') if msg.get('id') is not None else '') + '|' + reasoning_key,
+            )
         return None
     return (
         role,
@@ -7095,6 +7117,22 @@ def _merge_display_messages_after_agent_result(
             # message twice in the current delta. Treat only adjacent identity
             # matches as replay duplicates so identical answers in separate
             # user turns remain visible.
+            continue
+        if (
+            key is not None
+            and key in seen
+            and _is_reasoning_only_assistant_message(msg)
+        ):
+            # _restore_display_reasoning_metadata re-inserts a deepcopy of every
+            # historical Thinking row on every writeback, and it lands
+            # NON-adjacently, so the adjacency guard above cannot see it. With a
+            # correct identity that still leaked exactly one copy per writeback
+            # (measured: linear +1/cycle), which is what grew session
+            # 27b42e26d196 to 1,975,499 rows / 6.23 GiB.
+            #
+            # Deliberately scoped to rows with no visible content: identical
+            # *visible* answers in separate user turns must stay visible, which
+            # is why the guard above is adjacency-only. Do not widen this.
             continue
         if _is_context_compression_marker(msg) and key is not None and key in seen:
             continue
