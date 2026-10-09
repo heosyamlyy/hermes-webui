@@ -6442,6 +6442,17 @@ def all_sessions(diag=None, *, include_lineage_metadata: bool = True):
                 if not s.get('profile'):
                     s['profile'] = 'default'
             return result
+        except MemoryError:
+            # Never answer memory exhaustion by doing MORE work. The full-scan
+            # fallback below Session.load()s every sidecar in the directory,
+            # which on 2026-10-08 meant parsing a 6.23 GiB file at ~3.7x its
+            # size in RSS. Catching MemoryError in the bare `except Exception`
+            # below would turn a single failed index read into a corpus-wide
+            # allocation storm. Fail closed and let the caller surface an error.
+            logger.error(
+                "MemoryError loading session index; refusing to escalate to a full scan"
+            )
+            raise
         except Exception:
             logger.debug("Failed to load session index, falling back to full scan")
     # Full scan fallback
@@ -6461,6 +6472,12 @@ def all_sessions(diag=None, *, include_lineage_metadata: bool = True):
         try:
             s = Session.load(p.stem)
             if s: out.append(s)
+        except MemoryError:
+            # Swallowing this would continue the loop and attempt the NEXT
+            # sidecar with a heap that is already exhausted, thrashing until
+            # the kernel kills the process. Abort the scan instead.
+            logger.error("MemoryError loading session %s; aborting full scan", p.stem)
+            raise
         except Exception:
             logger.debug("Failed to load session from %s", p)
     _diag_stage(diag, "all_sessions.full_scan_overlay")
