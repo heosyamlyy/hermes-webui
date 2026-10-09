@@ -1118,6 +1118,13 @@ def _read_metadata_json_prefix(path, max_prefix_bytes=65536):
     return None
 
 
+# Ceiling for the legacy exact-count fallback in _sidecar_message_count_bounded.
+# Below this a full parse is harmless and preserves the #1558 shrink guard for
+# sidecars that carry no message_count; above it we refuse and the caller fails
+# safe, because a full parse is exactly what OOM-killed the service.
+_LEGACY_COUNT_FULL_PARSE_MAX_BYTES = 64 * 1024 * 1024
+
+
 def _sidecar_message_count_bounded(path, sid=None) -> int:
     """Previous on-disk message count via a bounded read -- never a full parse.
 
@@ -1154,6 +1161,18 @@ def _sidecar_message_count_bounded(path, sid=None) -> int:
                 return idx
         except Exception:
             pass
+    # Still unknown. A legacy or externally-written sidecar carries neither a
+    # message_count prefix nor an index row, and the #1558 shrink guard needs a
+    # real count -- returning "unknown" here silently dropped the backup for
+    # exactly those files. Full-parsing is safe while the file is SMALL; only
+    # the multi-GB case is dangerous, and that is the case the caller must fail
+    # safe on. The largest healthy sidecar in a real corpus is tens of MB.
+    try:
+        if os.path.getsize(path) <= _LEGACY_COUNT_FULL_PARSE_MAX_BYTES:
+            with open(path, 'r', encoding='utf-8') as fh:
+                return len(json.load(fh).get('messages') or [])
+    except Exception:
+        pass
     return -1
 
 
@@ -1507,7 +1526,9 @@ class Session:
                 existing_msg_count = _sidecar_message_count_bounded(self.path, self.session_id)
                 incoming_msg_count = len(self.messages or [])
                 if (
-                    existing_msg_count > 0
+                    # != 0 so an UNKNOWN count (-1) also refuses: we must never
+                    # blank a sidecar we could not prove was already empty.
+                    existing_msg_count != 0
                     and incoming_msg_count == 0
                     and (self.active_stream_id or self.pending_user_message)
                 ):
@@ -1520,7 +1541,9 @@ class Session:
                         self.active_stream_id,
                     )
                     return
-                if existing_msg_count > incoming_msg_count:
+                # existing_msg_count < 0 means UNKNOWN -> back up rather than
+                # risk overwriting a file we could not count (fail safe).
+                if existing_msg_count < 0 or existing_msg_count > incoming_msg_count:
                     bak_path = self.path.with_suffix('.json.bak')
                     # SHOULD-FIX #2 (Opus): atomic write via tmp+replace,
                     # mirroring the main save() pattern below. Prevents a

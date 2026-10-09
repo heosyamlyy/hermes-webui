@@ -158,3 +158,77 @@ def test_refuses_to_overwrite_messages_with_empty_active_snapshot(session_dir):
     assert len(json.loads(p.read_text())["messages"]) == 5, (
         "an empty snapshot with an active stream overwrote real messages"
     )
+
+
+# ── fail-safe behaviour when the count cannot be determined ────────────────
+# Regression: the first version of the bounded read returned -1 ("unknown") for
+# any sidecar lacking message_count, which silently dropped the #1558 shrink
+# backup for legacy/externally-written files (caught by
+# tests/test_issue2592_partial_dedupe.py) and would also have let an empty
+# snapshot blank a sidecar whose contents we could not count.
+
+def _write_legacy_sidecar(session_dir, sid, n_messages):
+    """A hand-written sidecar with NO message_count -- the legacy/external shape."""
+    payload = {
+        "session_id": sid,
+        "title": "legacy",
+        "created_at": 100.0,
+        "updated_at": 200.0,
+        "messages": [{"role": "user", "content": f"m{i}"} for i in range(n_messages)],
+        "tool_calls": [],
+    }
+    (session_dir / f"{sid}.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_legacy_sidecar_without_message_count_is_counted_exactly(session_dir):
+    _write_legacy_sidecar(session_dir, "lg", 5)
+    assert _sidecar_message_count_bounded(session_dir / "lg.json", "lg") == 5
+
+
+def test_legacy_sidecar_shrink_still_produces_backup(session_dir):
+    """The exact regression that the partial-dedupe test caught."""
+    sid = "lgshrink"
+    _write_legacy_sidecar(session_dir, sid, 5)
+    s = Session(session_id=sid, messages=[{"role": "user", "content": "only one"}])
+    s.save(skip_index=True)
+    assert (session_dir / f"{sid}.json.bak").exists(), (
+        "a legacy sidecar lost its #1558 shrink backup"
+    )
+
+
+def test_uncountable_oversized_sidecar_fails_safe_to_backup(session_dir, monkeypatch):
+    """Too large to count -> unknown -> back up rather than overwrite blind."""
+    sid = "huge"
+    _write_legacy_sidecar(session_dir, sid, 5)
+    monkeypatch.setattr(models, "_LEGACY_COUNT_FULL_PARSE_MAX_BYTES", 1)  # force "unknown"
+    assert _sidecar_message_count_bounded(session_dir / f"{sid}.json", sid) == -1
+
+    s = Session(session_id=sid, messages=[{"role": "user", "content": "a"}, {"role": "user", "content": "b"}])
+    s.save(skip_index=True)
+    assert (session_dir / f"{sid}.json.bak").exists(), (
+        "an uncountable sidecar was overwritten without a backup"
+    )
+
+
+def test_unknown_count_refuses_empty_active_snapshot(session_dir, monkeypatch):
+    """Unknown count must not permit blanking the sidecar."""
+    sid = "huguard"
+    _write_legacy_sidecar(session_dir, sid, 5)
+    monkeypatch.setattr(models, "_LEGACY_COUNT_FULL_PARSE_MAX_BYTES", 1)
+    s = Session(session_id=sid, messages=[], active_stream_id="stream-x")
+    s.save(skip_index=True)
+    persisted = json.loads((session_dir / f"{sid}.json").read_text())
+    assert len(persisted["messages"]) == 5, "unknown count allowed an empty snapshot to win"
+
+
+def test_oversized_sidecar_is_never_fully_parsed(session_dir, monkeypatch):
+    """The whole point: above the ceiling we must not json.load the file."""
+    sid = "noparse"
+    _write_legacy_sidecar(session_dir, sid, 5)
+    monkeypatch.setattr(models, "_LEGACY_COUNT_FULL_PARSE_MAX_BYTES", 1)
+
+    def boom(*a, **kw):
+        raise AssertionError("full json.load() of an oversized sidecar")
+
+    monkeypatch.setattr(models.json, "load", boom)
+    assert _sidecar_message_count_bounded(session_dir / f"{sid}.json", sid) == -1
