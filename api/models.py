@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+import shutil
 import re
 import threading
 import time
@@ -1117,6 +1118,45 @@ def _read_metadata_json_prefix(path, max_prefix_bytes=65536):
     return None
 
 
+def _sidecar_message_count_bounded(path, sid=None) -> int:
+    """Previous on-disk message count via a bounded read -- never a full parse.
+
+    ``Session.save()`` used to ``read_text()`` + ``json.loads()`` the ENTIRE
+    previous sidecar on every save purely to compare message counts. Measured
+    amplification is ~3.7x the file size in peak RSS (the sidecar is written
+    with ``ensure_ascii=False``, so the decoded str is UCS-2 at 2 bytes/char),
+    and on the 6.23 GiB session of 2026-10-08 that made save() the direct
+    allocator behind three GLOBAL oom-kills at ~115 GB RSS.
+
+    ``save()`` itself writes ``message_count`` into the metadata prefix
+    (BEFORE the messages array, see #5854), so a bounded 64 KiB read answers
+    the question. Deliberately does NOT call ``_persisted_message_count()``:
+    that helper falls back to a full ``Session.load()`` for legacy sidecars,
+    which would reintroduce exactly the failure this removes.
+
+    Returns -1 when the count cannot be determined, preserving the previous
+    behaviour for an unparseable sidecar.
+    """
+    try:
+        prefix = _read_metadata_json_prefix(path)
+        if prefix:
+            count = _parse_nonnegative_int(json.loads(prefix).get('message_count'))
+            if count is not None:
+                return count
+    except Exception:
+        pass
+    # Legacy sidecar whose prefix carries no message_count: consult the cheap
+    # sidebar index instead of full-parsing.
+    if sid is not None:
+        try:
+            idx = _parse_nonnegative_int(_lookup_index_message_count(sid))
+            if idx is not None:
+                return idx
+        except Exception:
+            pass
+    return -1
+
+
 def _load_session_from_path(path: Path) -> "Session | None":
     """Load a session from an explicit JSON path without consulting SESSION_DIR."""
     try:
@@ -1459,12 +1499,12 @@ class Session:
         # their .bak get restored automatically.
         try:
             if self.path.exists():
-                existing_text = self.path.read_text(encoding='utf-8')
-                try:
-                    existing = json.loads(existing_text)
-                    existing_msg_count = len(existing.get('messages') or [])
-                except (json.JSONDecodeError, ValueError):
-                    existing_msg_count = -1  # corrupt → always back up
+                # Bounded 64 KiB metadata read. Reading the whole previous
+                # sidecar here cost ~3.7x its size in RSS on EVERY save and was
+                # the direct allocator behind the 2026-10-08 global oom-kills
+                # (6.23 GiB sidecar -> ~115 GB RSS). -1 means "count unknown",
+                # exactly as the old json.loads failure branch did.
+                existing_msg_count = _sidecar_message_count_bounded(self.path, self.session_id)
                 incoming_msg_count = len(self.messages or [])
                 if (
                     existing_msg_count > 0
@@ -1494,8 +1534,13 @@ class Session:
                         bak_tmp = bak_path.with_suffix(
                             f'.bak.tmp.{os.getpid()}.{threading.current_thread().ident}'
                         )
-                        with open(bak_tmp, 'w', encoding='utf-8') as bf:
-                            bf.write(existing_text)
+                        # Stream the previous sidecar to the backup instead of
+                        # materialising it as a Python str. This path is rare
+                        # (shrinking saves only), but on an oversized session
+                        # holding the whole file in memory is precisely the
+                        # allocation we just removed from the hot path.
+                        with open(self.path, 'rb') as _src, open(bak_tmp, 'wb') as bf:
+                            shutil.copyfileobj(_src, bf, 1024 * 1024)
                             bf.flush()
                             os.fsync(bf.fileno())
                         _safe_replace(bak_tmp, bak_path)
