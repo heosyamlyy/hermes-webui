@@ -51,6 +51,19 @@ _FSYNC_MODE_TERMINAL_ONLY = "terminal-only"
 _SESSION_REPLAY_MAX_BYTES = 4 * 1024 * 1024
 _SESSION_REPLAY_MAX_ROWS = 4096
 _SESSION_REPLAY_READ_CHUNK_BYTES = 64 * 1024
+# Per-run write cap. The READ side has been bounded since #5854
+# (_SESSION_REPLAY_MAX_BYTES above), but the WRITE side had no cap, no
+# rotation and no age prune -- the only deletion was session delete. On
+# 2026-10-08 `_run_journal/` had reached 30 GB, 12 GB of it belonging to a
+# single run whose session was being flooded by duplicated reasoning rows.
+# Terminal events are always recorded so a capped run still closes cleanly;
+# only further non-terminal events are dropped, after one apperror marker.
+# 0 disables the cap.
+_RUN_JOURNAL_RUN_MAX_BYTES = int(
+    os.environ.get("HERMES_WEBUI_RUN_JOURNAL_MAX_BYTES") or 256 * 1024 * 1024
+)
+# Paths already capped, so the apperror marker is written exactly once.
+_capped_run_paths: set[str] = set()
 _SNAPSHOT_ARGS_MAX_ITEMS = 64
 _SNAPSHOT_ARGS_MAX_DEPTH = 8
 _SNAPSHOT_ARGS_MAX_STRING_CHARS = 8192
@@ -402,6 +415,45 @@ def append_run_event(
     if not event_name:
         raise ValueError("event_name is required")
     with _lock_for(path):
+        # Size cap (see _RUN_JOURNAL_RUN_MAX_BYTES). Checked inside the lock and
+        # BEFORE a seq is reserved so dropped events do not burn sequence
+        # numbers and leave gaps for the replay reader.
+        if _RUN_JOURNAL_RUN_MAX_BYTES > 0 and not _terminal_state_for_event(event_name, payload):
+            try:
+                _current_size = path.stat().st_size
+            except OSError:
+                _current_size = 0
+            if _current_size >= _RUN_JOURNAL_RUN_MAX_BYTES:
+                _key = str(path)
+                if _key in _capped_run_paths:
+                    # Already marked; drop silently rather than grow further.
+                    return {
+                        "version": 1,
+                        "event_id": f"{run_id}:dropped",
+                        "seq": -1,
+                        "run_id": str(run_id),
+                        "session_id": str(session_id),
+                        "event": event_name,
+                        "type": event_name,
+                        "created_at": float(created_at if created_at is not None else time.time()),
+                        "terminal": False,
+                        "terminal_state": None,
+                        "payload": {},
+                        "dropped": "run_journal_size_cap",
+                    }
+                _capped_run_paths.add(_key)
+                # Convert this one event into a terminal marker so the run
+                # closes cleanly and the reason is durable.
+                event_name = "apperror"
+                payload = {
+                    "error": "run_journal_size_cap",
+                    "limit_bytes": _RUN_JOURNAL_RUN_MAX_BYTES,
+                    "size_bytes": _current_size,
+                    "message": (
+                        "run journal exceeded its size cap; further non-terminal "
+                        "events for this run are dropped"
+                    ),
+                }
         if seq is not None:
             assigned_seq = int(seq)
             _note_assigned_seq(path, assigned_seq)
